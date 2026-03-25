@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: hw1/extendible
+cpu: 13th Gen Intel(R) Core(TM) i5-13400F
+BenchmarkTableInsert/size=1000-16         	       3	  59620789 ns/op	     59621 ns/item	     16773 ops/s	 6354685 B/op	   62648 allocs/op
+BenchmarkTableInsert/size=10000-16        	       3	 697807760 ns/op	     69781 ns/item	     14331 ops/s	66918816 B/op	  632923 allocs/op
+BenchmarkTableInsert/size=100000-16       	       3	9171171942 ns/op	     91712 ns/item	     10904 ops/s	1160408173 B/op	 6426547 allocs/op
+BenchmarkTableUpdate/size=1000-16         	       3	  48779637 ns/op	     48780 ns/item	     20500 ops/s	 5006080 B/op	   54952 allocs/op
+BenchmarkTableUpdate/size=10000-16        	       3	 598256964 ns/op	     59826 ns/item	     16715 ops/s	50614810 B/op	  567337 allocs/op
+BenchmarkTableUpdate/size=100000-16       	       3	6269362807 ns/op	     62694 ns/item	     15951 ops/s	510969141 B/op	 5769162 allocs/op
+BenchmarkTableGet/size=1000-16            	       3	  15654867 ns/op	     15655 ns/item	     63878 ops/s	 3535426 B/op	   42921 allocs/op
+BenchmarkTableGet/size=10000-16           	       3	 149455543 ns/op	     14946 ns/item	     66910 ops/s	35606912 B/op	  439859 allocs/op
+BenchmarkTableGet/size=100000-16          	       3	1488804853 ns/op	     14888 ns/item	     67168 ops/s	360460277 B/op	 4470764 allocs/op
+BenchmarkTableDelete/size=1000-16         	       3	 138056566 ns/op	    138057 ns/item	      7243 ops/s	14276040 B/op	  158066 allocs/op
+BenchmarkTableDelete/size=10000-16        	       3	1458690161 ns/op	    145869 ns/item	      6855 ops/s	179653464 B/op	 1610017 allocs/op
+BenchmarkTableDelete/size=100000-16       	       3	37104295557 ns/op	    371043 ns/item	      2695 ops/s	8186359549 B/op	16355172 allocs/op
+PASS
+ok  	hw1/extendible	348.228s

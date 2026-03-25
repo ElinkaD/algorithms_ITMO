@@ -1,0 +1,10 @@
+goos: linux
+goarch: amd64
+pkg: hw1/lsh
+cpu: 13th Gen Intel(R) Core(TM) i5-13400F
+BenchmarkTableBuild/size=1000-16         	       3	    280267 ns/op	       280.3 ns/item	   3568026 ops/s	  310392 B/op	     753 allocs/op
+BenchmarkTableAdd/size=1000-16           	       3	    255834 ns/op	       255.8 ns/item	   3908780 ops/s	  306498 B/op	     747 allocs/op
+BenchmarkTableSearch/size=1000-16        	       3	   1031637 ns/op	     20633 ns/item	     48467 ops/s	  472928 B/op	     968 allocs/op
+BenchmarkTableFullScan/size=1000-16      	       3	   1639530 ns/op	     32791 ns/item	     30497 ops/s	 2097328 B/op	     768 allocs/op
+PASS
+ok  	hw1/lsh	0.021s
