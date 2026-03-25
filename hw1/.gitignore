@@ -1,1 +1,2 @@
-bucket_*.dat
+artifacts/
+plot_metrics.gnuplot
