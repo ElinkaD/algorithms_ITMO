@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func BenchmarkInsert(b *testing.B) { //// смотрим, как меняется стоимость построения индекса при росте числа объектов
+func BenchmarkInsert(b *testing.B) { // смотрим, как меняется стоимость построения индекса при росте числа объектов
 	sizes := []int{1000, 10000, 50000, 100000}
 
 	for _, size := range sizes {
@@ -58,7 +58,6 @@ func BenchmarkSearchExact(b *testing.B) {
 	}
 }
 
-// влияние сразу трех факторов: размера данных, точности geohash и радиуса поиска
 func BenchmarkSearchNearby(b *testing.B) {
 	sizes := []int{1000, 10000, 50000, 100000}
 	precisions := []int{4, 5}
