@@ -1,0 +1,11 @@
+plot_metrics.gnuplot
+benchmarks.csv
+*.prof
+**/.venv-graphs/
+**/.mplconfig/
+/.venv-graphs/
+/.mplconfig/
+**/__pycache__/
+**/*.pyc
+**/*.test
+/hw2/artifacts/
