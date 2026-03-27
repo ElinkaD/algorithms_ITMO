@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func BenchmarkInsert(b *testing.B) { // смотрим, как меняется стоимость построения индекса при росте числа объектов
+func BenchmarkInsert(b *testing.B) { 
 	sizes := []int{1000, 10000, 50000, 100000}
 
 	for _, size := range sizes {
