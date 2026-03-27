@@ -5,7 +5,7 @@ SUMMARY_DIR := $(METRICS_DIR)/summary
 PROFILES_DIR := $(ARTIFACTS_DIR)/profiles
 BENCH_RUNS ?= 5
 
-.PHONY: test bench bench-save plot clean dirs flamegraph
+.PHONY: test bench bench-save plot clean dirs flamegraph memprofile
 
 test:
 	env GOCACHE=/tmp/go-build-hw2 go test ./...
@@ -34,6 +34,11 @@ flamegraph: dirs
 	env GOCACHE=/tmp/go-build-hw2 go test -run '^$$' -bench 'BenchmarkSearchNearby/size=100000/precision=5/radius=50000$$' -cpuprofile $(PROFILES_DIR)/search_nearby.cpu.prof
 	mkdir -p ../graphs/hw2
 	env GOCACHE=/tmp/go-build-hw2 go tool pprof -png -output ../graphs/hw2/search_nearby_flame.png $(PROFILES_DIR)/search_nearby.cpu.prof
+
+memprofile: dirs
+	env GOCACHE=/tmp/go-build-hw2 go test -run '^$$' -bench 'BenchmarkSearchNearby/size=100000/precision=5/radius=50000$$' -memprofile $(PROFILES_DIR)/search_nearby.mem.prof
+	mkdir -p ../graphs/hw2
+	env GOCACHE=/tmp/go-build-hw2 go tool pprof -png -output ../graphs/hw2/search_nearby_mem.png $(PROFILES_DIR)/search_nearby.mem.prof
 
 clean:
 	rm -rf $(ARTIFACTS_DIR)

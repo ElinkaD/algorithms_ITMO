@@ -7,7 +7,7 @@ import (
 
 const geohashBase32 = "0123456789bcdefghjkmnpqrstuvwxyz"
 
-var geohashDecodeMap = buildDecodeMap()
+var geohashDecodeMap = buildDecodeMap() // мапа для обратного декодирования 
 
 type boundingBox struct {
 	minLat float64
@@ -16,6 +16,7 @@ type boundingBox struct {
 	maxLng float64
 }
 
+// кодирует точку в geohash заданной точности
 func EncodeGeohash(lat, lng float64, precision int) (string, error) {
 	if precision <= 0 {
 		return "", errors.New("precision must be positive")
@@ -28,16 +29,18 @@ func EncodeGeohash(lat, lng float64, precision int) (string, error) {
 	}
 
 	var hash []byte
+
 	minLat, maxLat := -90.0, 90.0
 	minLng, maxLng := -180.0, 180.0
+
 	bit, ch := 0, 0
 	evenBit := true
 
 	for len(hash) < precision {
 		if evenBit {
-			// В geohash биты широты и долготы чередуются.
-			// Для evenBit делим текущий диапазон по долготе.
+			// долгота
 			mid := (minLng + maxLng) / 2
+			// если точка правее середины → записываем 1 и сужаем диапазон
 			if lng >= mid {
 				ch = (ch << 1) | 1
 				minLng = mid
@@ -46,7 +49,7 @@ func EncodeGeohash(lat, lng float64, precision int) (string, error) {
 				maxLng = mid
 			}
 		} else {
-			// Для oddBit делим диапазон по широте.
+			// широта
 			mid := (minLat + maxLat) / 2
 			if lat >= mid {
 				ch = (ch << 1) | 1
@@ -60,6 +63,7 @@ func EncodeGeohash(lat, lng float64, precision int) (string, error) {
 		evenBit = !evenBit
 		bit++
 
+		// каждые 5 бит → один символ base32
 		if bit == 5 {
 			hash = append(hash, geohashBase32[ch])
 			bit, ch = 0, 0
@@ -82,12 +86,14 @@ func DecodeBoundingBox(hash string) (boundingBox, error) {
 	}
 
 	evenBit := true
+
 	for _, r := range hash {
 		value, ok := geohashDecodeMap[r]
 		if !ok {
 			return boundingBox{}, errors.New("invalid geohash symbol")
 		}
 
+		// каждый символ = 5 бит → проходим по ним маской
 		for mask := 16; mask != 0; mask >>= 1 {
 			if evenBit {
 				mid := (box.minLng + box.maxLng) / 2
@@ -120,10 +126,11 @@ func (b boundingBox) latHeightMeters() float64 {
 }
 
 func (b boundingBox) lngWidthMeters() float64 {
-	centerLat, _ := b.center()
+	centerLat, _ := b.center() // считаем на средней широте, иначе будет искажение
 	return haversineMeters(centerLat, b.minLng, centerLat, b.maxLng)
 }
 
+// возвращает список geohash-ов, которые покрывают окно поиска (радиус)
 func neighboringHashes(lat, lng, radiusMeters float64, precision int) ([]string, error) {
 	window := searchBoundingBox(lat, lng, radiusMeters)
 
@@ -132,15 +139,16 @@ func neighboringHashes(lat, lng, radiusMeters float64, precision int) ([]string,
 		return nil, err
 	}
 
-	// тут я специально иду по окну поиска с шагом размера geohash-ячейки.
-	// так мы трогаем только соседние ячейки запроса, а не все buckets индекса.
+	// идем по окну с шагом размера geohash-ячейки
 	seen := make(map[string]struct{})
 	result := make([]string, 0)
+
 	epsilonLat := math.Min(cellHeight/10, 1e-9)
 	epsilonLng := math.Min(cellWidth/10, 1e-9)
 
 	for sampleLat := window.minLat; sampleLat <= window.maxLat+epsilonLat; sampleLat += cellHeight {
 		clampedLat := clampLat(sampleLat)
+
 		for _, lngInterval := range splitLongitudeInterval(window.minLng, window.maxLng) {
 			for sampleLng := lngInterval[0]; sampleLng <= lngInterval[1]+epsilonLng; sampleLng += cellWidth {
 				normalizedLng := normalizeLng(sampleLng)
@@ -149,21 +157,24 @@ func neighboringHashes(lat, lng, radiusMeters float64, precision int) ([]string,
 				if err != nil {
 					return nil, err
 				}
+
+				// убираем дубликаты
 				if _, ok := seen[hash]; ok {
 					continue
 				}
+
 				seen[hash] = struct{}{}
 				result = append(result, hash)
 			}
 		}
 	}
 
-	// на всякий случай добавляю geohash самой точки запроса.
-	// это помогает не зависеть от того, как именно легли границы шага.
+	// отдельно добавляем hash центра — чтобы точно не потерять текущую ячейку
 	centerHash, err := EncodeGeohash(clampLat(lat), normalizeLng(lng), precision)
 	if err != nil {
 		return nil, err
 	}
+
 	if _, ok := seen[centerHash]; !ok {
 		result = append(result, centerHash)
 	}
@@ -171,6 +182,7 @@ func neighboringHashes(lat, lng, radiusMeters float64, precision int) ([]string,
 	return result, nil
 }
 
+// для того  чтобы понять шаг при обходе
 func geohashCellSizeDegrees(precision int) (float64, float64, error) {
 	sampleHash, err := EncodeGeohash(0, 0, precision)
 	if err != nil {
@@ -185,12 +197,14 @@ func geohashCellSizeDegrees(precision int) (float64, float64, error) {
 	return box.maxLat - box.minLat, box.maxLng - box.minLng, nil
 }
 
+// построение "окна поиска", которое потом разбиваем на geohash-ячейки
 func searchBoundingBox(lat, lng, radiusMeters float64) boundingBox {
 	latDelta := radiansToDegrees(radiusMeters / earthRadiusMeters)
+
 	minLat := clampLat(lat - latDelta)
 	maxLat := clampLat(lat + latDelta)
 
-	// Если окно поиска цепляет полюс, то по долготе оно фактически покрывает весь мир.
+	// если задели полюс → по долготе покрываем всё
 	if minLat <= -90 || maxLat >= 90 {
 		return boundingBox{
 			minLat: minLat,
@@ -200,17 +214,16 @@ func searchBoundingBox(lat, lng, radiusMeters float64) boundingBox {
 		}
 	}
 
+	// учитываем сжатие долгот к полюсам
 	maxAbsLat := math.Max(math.Abs(minLat), math.Abs(maxLat))
 	cosLat := math.Cos(degreesToRadians(maxAbsLat))
+
 	lngDelta := 180.0
 	if math.Abs(cosLat) > 1e-12 {
-		// Берем худший случай по широте внутри всего окна,
-		// иначе можно занизить охват по долготе и потерять точки.
 		lngDelta = radiansToDegrees(radiusMeters / (earthRadiusMeters * cosLat))
 	}
 
-	// Если радиус по долготе стал слишком большим, опять же считаем,
-	// что окно охватывает весь диапазон долгот.
+	// если слишком широкий радиус → весь диапазон
 	if lngDelta >= 180 {
 		return boundingBox{
 			minLat: minLat,
@@ -228,13 +241,12 @@ func searchBoundingBox(lat, lng, radiusMeters float64) boundingBox {
 	}
 }
 
+// проверка пересечения двух bounding box
 func (b boundingBox) intersects(other boundingBox) bool {
 	if b.maxLat < other.minLat || other.maxLat < b.minLat {
 		return false
 	}
 
-	// По долготе интервал может "разрываться" на границе -180/180,
-	// поэтому обычного сравнения min/max недостаточно.
 	return longitudeIntervalsIntersect(b.minLng, b.maxLng, other.minLng, other.maxLng)
 }
 
@@ -246,6 +258,7 @@ func buildDecodeMap() map[rune]int {
 	return decodeMap
 }
 
+// проверка пересечения интервалов по долготе с учётом разрыва
 func longitudeIntervalsIntersect(aMin, aMax, bMin, bMax float64) bool {
 	aIntervals := splitLongitudeInterval(aMin, aMax)
 	bIntervals := splitLongitudeInterval(bMin, bMax)
@@ -261,13 +274,13 @@ func longitudeIntervalsIntersect(aMin, aMax, bMin, bMax float64) bool {
 	return false
 }
 
+// разбивает интервал долгот, если он пересекает -180/180
 func splitLongitudeInterval(minLng, maxLng float64) [][2]float64 {
 	if minLng <= maxLng {
 		return [][2]float64{{minLng, maxLng}}
 	}
 
-	// Если min > max, значит интервал перешел через линию перемены дат
-	// и его нужно рассматривать как два куска.
+	// если перешли через линию смены дат → разбиваем на два
 	return [][2]float64{
 		{minLng, 180},
 		{-180, maxLng},

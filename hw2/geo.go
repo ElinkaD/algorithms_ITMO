@@ -13,12 +13,12 @@ type GeoObject struct {
 	Lng float64
 }
 
-type SearchResult struct {
+type SearchResult struct { //найденный объект и расстояние до него
 	Object   GeoObject
 	Distance float64
 }
 
-func haversineMeters(lat1, lng1, lat2, lng2 float64) float64 {
+func haversineMeters(lat1, lng1, lat2, lng2 float64) float64 { //расстояние между двумя точками на сфере
 	lat1Rad := degreesToRadians(lat1)
 	lng1Rad := degreesToRadians(lng1)
 	lat2Rad := degreesToRadians(lat2)

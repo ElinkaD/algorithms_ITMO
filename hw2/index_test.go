@@ -15,7 +15,7 @@ func TestSearchNearbyMatchesFullScanOnRandomData(t *testing.T) {
 		t.Fatalf("NewIndex() error = %v", err)
 	}
 
-	for _, point := range points {
+	for _, point := range points { 
 		if err := index.Insert(point); err != nil {
 			t.Fatalf("Insert() error = %v", err)
 		}
@@ -39,7 +39,8 @@ func TestSearchNearbyMatchesFullScanOnRandomData(t *testing.T) {
 	}
 }
 
-func TestSearchNearbyCornerCases(t *testing.T) {
+//Проверяет граничные случаи, на которых часто ломается логика поиска.
+func TestSearchNearbyCornerCases(t *testing.T) { //
 	t.Run("empty index", func(t *testing.T) {
 		index, err := NewIndex(5)
 		if err != nil {
@@ -115,15 +116,20 @@ func TestSearchNearbyCornerCases(t *testing.T) {
 	})
 }
 
-func TestSearchExactReturnsBucket(t *testing.T) {
+//Проверяет, что SearchExact возвращает только объекты с точно такими же координатами, а не все объекты из того же geohash bucket.
+func TestSearchExactReturnsOnlyExactCoordinateMatches(t *testing.T) {
 	index := mustIndex(t, 4)
 	first := GeoObject{ID: "a", Lat: 55.75, Lng: 37.62}
 	second := GeoObject{ID: "b", Lat: 55.751, Lng: 37.621}
+	third := GeoObject{ID: "c", Lat: 55.75, Lng: 37.62}
 
 	if err := index.Insert(first); err != nil {
 		t.Fatalf("Insert() error = %v", err)
 	}
 	if err := index.Insert(second); err != nil {
+		t.Fatalf("Insert() error = %v", err)
+	}
+	if err := index.Insert(third); err != nil {
 		t.Fatalf("Insert() error = %v", err)
 	}
 
@@ -132,10 +138,26 @@ func TestSearchExactReturnsBucket(t *testing.T) {
 		t.Fatalf("SearchExact() error = %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("expected 2 objects in bucket, got %d", len(got))
+		t.Fatalf("expected 2 exact matches, got %d", len(got))
+	}
+	if got[0].ID != "a" || got[1].ID != "c" {
+		t.Fatalf("unexpected exact matches: %+v", got)
 	}
 }
 
+//Проверяет валидацию входных данных для поиска по радиусу.
+func TestRadiusValidation(t *testing.T) {
+	index := mustIndex(t, 5)
+
+	if _, err := index.SearchNearby(10, 20, -1); err == nil {
+		t.Fatal("expected SearchNearby radius validation error")
+	}
+	if _, err := index.FullScan(10, 20, -1); err == nil {
+		t.Fatal("expected FullScan radius validation error")
+	}
+}
+
+//Проверяет, что EncodeGeohash не принимает невалидные координаты и точность.
 func TestEncodeGeohashRejectsInvalidValues(t *testing.T) {
 	if _, err := EncodeGeohash(91, 0, 5); err == nil {
 		t.Fatal("expected latitude validation error")
