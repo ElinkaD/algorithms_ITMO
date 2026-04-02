@@ -8,4 +8,4 @@ benchmarks.csv
 **/__pycache__/
 **/*.pyc
 **/*.test
-/hw2/artifacts/
+**/artifacts/

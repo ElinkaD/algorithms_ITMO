@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkInsert(b *testing.B) { 
-	sizes := []int{1000, 10000, 50000, 100000}
+	sizes := []int{1000, 10000, 50000, 100000, 500000, 1000000}
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
@@ -37,7 +37,7 @@ func BenchmarkInsert(b *testing.B) {
 
 // проверяем, как быстро находится точка по exact match
 func BenchmarkSearchExact(b *testing.B) {
-	sizes := []int{1000, 10000, 50000, 100000}
+	sizes := []int{1000, 10000, 50000, 100000, 500000, 1000000}
 
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
@@ -59,9 +59,9 @@ func BenchmarkSearchExact(b *testing.B) {
 }
 
 func BenchmarkSearchNearby(b *testing.B) {
-	sizes := []int{1000, 10000, 50000, 100000}
+	sizes := []int{1000, 10000, 50000, 100000, 500000, 1000000}
 	precisions := []int{4, 5}
-	radii := []float64{1000, 50000}
+	radii := []float64{1000, 100000}
 
 	for _, size := range sizes {
 		for _, precision := range precisions {
@@ -87,8 +87,8 @@ func BenchmarkSearchNearby(b *testing.B) {
 }
 
 func BenchmarkFullScan(b *testing.B) {
-	sizes := []int{1000, 10000, 50000, 100000}
-	radii := []float64{1000, 50000}
+	sizes := []int{1000, 10000, 50000, 100000, 500000, 1000000}
+	radii := []float64{1000, 100000}
 
 	for _, size := range sizes {
 		for _, radius := range radii {

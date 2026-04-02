@@ -29,11 +29,17 @@ def setup_style() -> None:
 
 
 def load_summary(name: str, columns: list[str]) -> pd.DataFrame:
-    return pd.read_csv(SUMMARY_DIR / name, sep="\t", header=None, names=columns)
+    df = pd.read_csv(SUMMARY_DIR / name, sep="\t", header=None, names=columns, dtype=str)
+    for column in columns:
+        df[column] = pd.to_numeric(df[column].str.replace(",", ".", regex=False), errors="raise")
+    return df
 
 
 def load_raw(name: str, columns: list[str]) -> pd.DataFrame:
-    return pd.read_csv(RAW_DIR / name, sep="\t", header=None, names=columns)
+    df = pd.read_csv(RAW_DIR / name, sep="\t", header=None, names=columns, dtype=str)
+    for column in columns:
+        df[column] = pd.to_numeric(df[column].str.replace(",", ".", regex=False), errors="raise")
+    return df
 
 
 def save(fig: plt.Figure, name: str) -> None:
@@ -41,6 +47,22 @@ def save(fig: plt.Figure, name: str) -> None:
     fig.tight_layout()
     fig.savefig(OUT_DIR / name, dpi=220, bbox_inches="tight")
     plt.close(fig)
+
+
+def set_size_ticks(ax, sizes) -> None:
+    known_ticks = [1000, 10000, 50000, 100000, 500000, 1000000]
+    tick_labels = {
+        1000: "1k",
+        10000: "10k",
+        50000: "50k",
+        100000: "100k",
+        500000: "500k",
+        1000000: "1M",
+    }
+    present = sorted({int(size) for size in sizes if int(size) in tick_labels})
+    if not present:
+        present = known_ticks[:4]
+    ax.set_xticks(present, labels=[tick_labels[tick] for tick in present])
 
 
 def plot_line_with_ci(ax, df, x_col, y_col, ci_col, label, color):
@@ -71,7 +93,7 @@ def plot_nearby_vs_fullscan(radius: int, precision: int, out_name: str, title: s
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xticks([1000, 10000, 50000, 100000], labels=["1k", "10k", "50k", "100k"])
+    set_size_ticks(ax, pd.concat([nearby["size"], fullscan["size"]]))
     ax.set_xlabel("dataset size")
     ax.set_ylabel("ns/op")
     ax.set_title(title)
@@ -90,7 +112,7 @@ def plot_exact() -> None:
     plot_line_with_ci(ax, exact, "size", "mean", "ci", "search exact", "#2ca02c")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xticks([1000, 10000, 50000, 100000], labels=["1k", "10k", "50k", "100k"])
+    set_size_ticks(ax, exact["size"])
     ax.set_xlabel("dataset size")
     ax.set_ylabel("ns/op")
     ax.set_title("search exact: mean and 95% ci")
@@ -109,7 +131,7 @@ def plot_insert() -> None:
     plot_line_with_ci(ax, insert, "size", "mean", "ci", "insert", "#9467bd")
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xticks([1000, 10000, 50000, 100000], labels=["1k", "10k", "50k", "100k"])
+    set_size_ticks(ax, insert["size"])
     ax.set_xlabel("dataset size")
     ax.set_ylabel("ns/op")
     ax.set_title("insert: mean and 95% ci")
@@ -138,7 +160,7 @@ def plot_memory(radius: int, out_name: str, metric: str, title: str) -> None:
     ax.plot(full_grouped["size"], full_grouped[metric], marker="o", linewidth=2.2, label="full scan", color="#d62728")
 
     ax.set_xscale("log")
-    ax.set_xticks([1000, 10000, 50000, 100000], labels=["1k", "10k", "50k", "100k"])
+    set_size_ticks(ax, pd.concat([nearby["size"], fullscan["size"]]))
     ax.set_xlabel("dataset size")
     ax.set_ylabel(metric)
     ax.set_title(title)
@@ -164,28 +186,28 @@ def main() -> None:
         title="search nearby vs full scan, radius=1000, precision=5",
     )
     plot_nearby_vs_fullscan(
-        radius=50000,
+        radius=100000,
         precision=4,
-        out_name="nearby_vs_fullscan_radius_50000_p4_pretty.png",
-        title="search nearby vs full scan, radius=50000, precision=4",
+        out_name="nearby_vs_fullscan_radius_100000_p4_pretty.png",
+        title="search nearby vs full scan, radius=100000, precision=4",
     )
     plot_nearby_vs_fullscan(
-        radius=50000,
+        radius=100000,
         precision=5,
-        out_name="nearby_vs_fullscan_radius_50000_p5_pretty.png",
-        title="search nearby vs full scan, radius=50000, precision=5",
+        out_name="nearby_vs_fullscan_radius_100000p5_pretty.png",
+        title="search nearby vs full scan, radius=100000, precision=5",
     )
     plot_memory(
-        radius=50000,
-        out_name="nearby_allocs_radius_50000_pretty.png",
+        radius=100000,
+        out_name="nearby_allocs_radius_100000_pretty.png",
         metric="allocs",
-        title="allocations per operation, radius=50000",
+        title="allocations per operation, radius=100000",
     )
     plot_memory(
-        radius=50000,
-        out_name="nearby_bytes_radius_50000_pretty.png",
+        radius=100000,
+        out_name="nearby_bytes_radius_100000_pretty.png",
         metric="bytes",
-        title="memory per operation, radius=50000",
+        title="memory per operation, radius=100000",
     )
 
 
