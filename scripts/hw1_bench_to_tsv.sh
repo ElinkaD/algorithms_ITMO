@@ -88,6 +88,11 @@ while IFS= read -r line; do
       size="${size%-*}"
       append_result "${output_dir}/add_runs.tsv" "${size}" "${nsop}" "${bytes}" "${allocs}"
       ;;
+    lsh:BenchmarkTableAddOne/size=*)
+      size="${name#BenchmarkTableAddOne/size=}"
+      size="${size%-*}"
+      append_result "${output_dir}/add_one_runs.tsv" "${size}" "${nsop}" "${bytes}" "${allocs}"
+      ;;
     lsh:BenchmarkTableSearch/size=*)
       size="${name#BenchmarkTableSearch/size=}"
       size="${size%-*}"

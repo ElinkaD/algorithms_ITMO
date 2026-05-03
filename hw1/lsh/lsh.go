@@ -208,6 +208,7 @@ func (i *Index) cellFor(tableIndex int, point Point) cell {
 	}
 }
 
+// точное евклидово расстояние 
 func pointDistance(a Point, b Point) float64 {
 	dx := a.X - b.X
 	dy := a.Y - b.Y

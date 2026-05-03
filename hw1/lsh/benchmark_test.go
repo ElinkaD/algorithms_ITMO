@@ -38,17 +38,21 @@ func BenchmarkTableAdd(b *testing.B) {
 	cfg := Config{Tables: 4, CellSize: 0.5, Radius: 0.2, Seed: 1}
 
 	for _, size := range benchmarkSizes(b) {
-		points := randomPoints(int64(size*97), size)
+		seed := int64(size * 97)
+		points := randomPoints(seed, size)
+		addPoints := benchmarkAddPoints(seed, points, batchAddCount(size))
+
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				index, err := Build(nil, cfg)
+				index, err := Build(points, cfg)
 				if err != nil {
 					b.Fatalf("Build failed: %v", err)
 				}
 
 				b.StartTimer()
-				for _, point := range points {
+				for j, point := range addPoints {
+					point.ID = fmt.Sprintf("%s-%d-%d", point.ID, i, j)
 					if err := index.Add(point); err != nil {
 						b.Fatalf("Add failed: %v", err)
 					}
@@ -56,7 +60,37 @@ func BenchmarkTableAdd(b *testing.B) {
 				b.StopTimer()
 			}
 
-			reportItemMetrics(b, size)
+			reportItemMetrics(b, len(addPoints))
+		})
+	}
+}
+
+func BenchmarkTableAddOne(b *testing.B) {
+	cfg := Config{Tables: 4, CellSize: 0.5, Radius: 0.2, Seed: 1}
+
+	for _, size := range benchmarkSizes(b) {
+		seed := int64(size * 97)
+		points := randomPoints(seed, size)
+		addPoint := benchmarkAddPoints(seed, points, 1)[0]
+
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				index, err := Build(points, cfg)
+				if err != nil {
+					b.Fatalf("Build failed: %v", err)
+				}
+
+				b.StartTimer()
+				point := addPoint
+				point.ID = fmt.Sprintf("%s-%d", point.ID, i)
+				if err := index.Add(point); err != nil {
+					b.Fatalf("AddOne failed: %v", err)
+				}
+				b.StopTimer()
+			}
+
+			reportItemMetrics(b, 1)
 		})
 	}
 }
@@ -139,6 +173,35 @@ func benchmarkQueries(points []Point) []Point {
 	}
 
 	return queries
+}
+
+func batchAddCount(size int) int {
+	count := size / 10
+	if count < 1 {
+		return 1
+	}
+	return count
+}
+
+func benchmarkAddPoints(seed int64, points []Point, count int) []Point {
+	if count < 1 {
+		count = 1
+	}
+
+	addPoints := make([]Point, count)
+	baseIndex := len(points) / 2
+	for i := 0; i < count; i++ {
+		base := points[(baseIndex+i)%len(points)]
+		offset := float64((int(seed)%11)+1+i%7) * 0.001
+		addPoints[i] = Point{
+			ID: fmt.Sprintf("add-%d-%d", seed, i),
+			X:  base.X + offset,
+			Y:  base.Y - offset/2,
+			Z:  base.Z + offset/3,
+		}
+	}
+
+	return addPoints
 }
 
 func benchmarkSizes(b testing.TB) []int {

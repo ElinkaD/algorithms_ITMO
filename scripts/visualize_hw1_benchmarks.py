@@ -32,15 +32,11 @@ OPERATION_CONFIG = {
         "title": "perfect hash for a fixed key set",
     },
     "lsh": {
-        "time": [
-            ("build", "build", "#1f77b4"),
-            ("add", "add", "#ff7f0e"),
-            ("search", "search", "#2ca02c"),
-            ("fullscan", "full scan", "#d62728"),
-        ],
+        "time": [],
         "raw": [
             ("build", "build", "#1f77b4"),
             ("add", "add", "#ff7f0e"),
+            ("add_one", "add one", "#9467bd"),
             ("search", "search", "#2ca02c"),
             ("fullscan", "full scan", "#d62728"),
         ],
@@ -156,6 +152,104 @@ def plot_perfect_time(summary_dir: Path, raw_dir: Path, out_dir: Path) -> None:
         save(fig, out_dir / "get_time_pretty.png")
 
 
+def lsh_query_count(size: int) -> int:
+    count = size // 1000
+    if count < 50:
+        return 50
+    if count > 200:
+        return 200
+    return count
+
+
+def plot_lsh_time(summary_dir: Path, out_dir: Path) -> None:
+    build_summary = summary_dir / "build_summary.tsv"
+    add_summary = summary_dir / "add_summary.tsv"
+    add_one_summary = summary_dir / "add_one_summary.tsv"
+    search_summary = summary_dir / "search_summary.tsv"
+    fullscan_summary = summary_dir / "fullscan_summary.tsv"
+
+    if build_summary.exists() or add_summary.exists():
+        fig, ax = plt.subplots()
+        used_sizes = []
+
+        if build_summary.exists():
+            df = load_tsv(build_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+            x = df["size"].to_numpy()
+            y = (df["mean"] / df["size"]).to_numpy()
+            ci = (df["ci"] / df["size"]).to_numpy()
+            used_sizes.extend(df["size"].tolist())
+            ax.plot(x, y, marker="o", linewidth=2.4, color="#1f77b4", label="build (ns/point)")
+            ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#1f77b4")
+
+        if add_summary.exists():
+            df = load_tsv(add_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+            batch_sizes = (df["size"] // 10).clip(lower=1)
+            x = df["size"].to_numpy()
+            y = (df["mean"] / batch_sizes).to_numpy()
+            ci = (df["ci"] / batch_sizes).to_numpy()
+            used_sizes.extend(df["size"].tolist())
+            ax.plot(x, y, marker="o", linewidth=2.4, color="#ff7f0e", label="add 10% batch (ns/point)")
+            ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#ff7f0e")
+
+        maybe_set_log_scale(ax, used_sizes, "x")
+        set_size_ticks(ax, used_sizes)
+        ax.set_xlabel("dataset size")
+        ax.set_ylabel("ns/point")
+        ax.set_title("lsh indexing: build vs add")
+        ax.legend(loc="upper left")
+        save(fig, out_dir / "index_time_pretty.png")
+
+    if add_one_summary.exists():
+        fig, ax = plt.subplots()
+        df = load_tsv(add_one_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+        x = df["size"].to_numpy()
+        y = df["mean"].to_numpy()
+        ci = df["ci"].to_numpy()
+
+        ax.plot(x, y, marker="o", linewidth=2.4, color="#9467bd", label="add one point")
+        ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#9467bd")
+        maybe_set_log_scale(ax, x, "x")
+        maybe_set_log_scale(ax, y, "y")
+        set_size_ticks(ax, x)
+        ax.set_xlabel("dataset size")
+        ax.set_ylabel("ns/op")
+        ax.set_title("lsh incremental add: one point")
+        ax.legend(loc="upper left")
+        save(fig, out_dir / "add_one_time_pretty.png")
+
+    if search_summary.exists() or fullscan_summary.exists():
+        fig, ax = plt.subplots()
+        used_sizes = []
+
+        if search_summary.exists():
+            df = load_tsv(search_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+            queries = df["size"].astype(int).map(lsh_query_count)
+            x = df["size"].to_numpy()
+            y = (df["mean"] / queries).to_numpy()
+            ci = (df["ci"] / queries).to_numpy()
+            used_sizes.extend(df["size"].tolist())
+            ax.plot(x, y, marker="o", linewidth=2.4, color="#2ca02c", label="search (ns/query)")
+            ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#2ca02c")
+
+        if fullscan_summary.exists():
+            df = load_tsv(fullscan_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+            queries = df["size"].astype(int).map(lsh_query_count)
+            x = df["size"].to_numpy()
+            y = (df["mean"] / queries).to_numpy()
+            ci = (df["ci"] / queries).to_numpy()
+            used_sizes.extend(df["size"].tolist())
+            ax.plot(x, y, marker="o", linewidth=2.4, color="#d62728", label="full scan (ns/query)")
+            ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#d62728")
+
+        maybe_set_log_scale(ax, used_sizes, "x")
+        set_size_ticks(ax, used_sizes)
+        ax.set_xlabel("dataset size")
+        ax.set_ylabel("ns/query")
+        ax.set_title("lsh search: indexed vs full scan")
+        ax.legend(loc="upper left")
+        save(fig, out_dir / "search_time_pretty.png")
+
+
 def plot_time(summary_dir: Path, out_dir: Path, algo: str) -> None:
     fig, ax = plt.subplots()
     used_sizes = []
@@ -229,6 +323,11 @@ def main() -> None:
         if legacy_plot.exists():
             legacy_plot.unlink()
         plot_perfect_time(summary_dir, raw_dir, out_dir)
+    elif algo == "lsh":
+        legacy_plot = out_dir / "time_pretty.png"
+        if legacy_plot.exists():
+            legacy_plot.unlink()
+        plot_lsh_time(summary_dir, out_dir)
     else:
         plot_time(summary_dir, out_dir, algo)
     plot_raw_metric(raw_dir, out_dir, algo, "allocs", "allocs_pretty.png", "allocs/op")
