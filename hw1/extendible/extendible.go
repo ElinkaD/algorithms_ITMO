@@ -64,6 +64,12 @@ type Table struct {
 	meta   metadata
 	closed bool
 	mu     sync.Mutex
+
+	writeBuffered bool
+	metaDirty     bool
+	bucketCache   map[int]Bucket
+	dirtyBuckets  map[int]struct{}
+	deletedBucket map[int]struct{}
 }
 
 func Open(path string, bucketCapacity int) (*Table, error) {
@@ -77,7 +83,12 @@ func Open(path string, bucketCapacity int) (*Table, error) {
 		return nil, err
 	}
 
-	table := &Table{path: path}
+	table := &Table{
+		path:          path,
+		bucketCache:   make(map[int]Bucket),
+		dirtyBuckets:  make(map[int]struct{}),
+		deletedBucket: make(map[int]struct{}),
+	}
 	metaPath := table.metadataPath()
 
 	if _, err := os.Stat(metaPath); err == nil {
@@ -142,7 +153,7 @@ func (t *Table) Insert(key string, value string) error {
 
 	for {
 		index := t.directoryIndex(key)
-		bucket, err := loadBucket(t.bucketPath(t.meta.Directory[index]))
+		bucket, err := t.loadBucketState(t.meta.Directory[index])
 		if err != nil {
 			return err
 		}
@@ -153,7 +164,7 @@ func (t *Table) Insert(key string, value string) error {
 
 		if len(bucket.Records) < t.meta.BucketCapacity {
 			bucket.Records = append(bucket.Records, Record{Key: key, Value: value})
-			return saveBucket(t.bucketPath(bucket.ID), bucket)
+			return t.saveBucketState(bucket)
 		}
 
 		if err := t.splitBucket(bucket); err != nil {
@@ -175,7 +186,7 @@ func (t *Table) Update(key string, value string) error {
 	}
 
 	index := t.directoryIndex(key)
-	bucket, err := loadBucket(t.bucketPath(t.meta.Directory[index]))
+	bucket, err := t.loadBucketState(t.meta.Directory[index])
 	if err != nil {
 		return err
 	}
@@ -186,7 +197,7 @@ func (t *Table) Update(key string, value string) error {
 	}
 
 	bucket.Records[recordIndex].Value = value
-	return saveBucket(t.bucketPath(bucket.ID), bucket)
+	return t.saveBucketState(bucket)
 }
 
 func (t *Table) Get(key string) (string, bool, error) {
@@ -202,7 +213,7 @@ func (t *Table) Get(key string) (string, bool, error) {
 	}
 
 	index := t.directoryIndex(key)
-	bucket, err := loadBucket(t.bucketPath(t.meta.Directory[index]))
+	bucket, err := t.loadBucketState(t.meta.Directory[index])
 	if err != nil {
 		return "", false, err
 	}
@@ -228,7 +239,7 @@ func (t *Table) Delete(key string) error {
 	}
 
 	index := t.directoryIndex(key)
-	bucket, err := loadBucket(t.bucketPath(t.meta.Directory[index]))
+	bucket, err := t.loadBucketState(t.meta.Directory[index])
 	if err != nil {
 		return err
 	}
@@ -239,7 +250,7 @@ func (t *Table) Delete(key string) error {
 	}
 
 	bucket.Records = append(bucket.Records[:recordIndex], bucket.Records[recordIndex+1:]...)
-	if err := saveBucket(t.bucketPath(bucket.ID), bucket); err != nil {
+	if err := t.saveBucketState(bucket); err != nil {
 		return err
 	}
 
@@ -250,8 +261,46 @@ func (t *Table) Close() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if err := t.flushLocked(); err != nil {
+		return err
+	}
 	t.closed = true
 	return nil
+}
+
+func (t *Table) EnableBufferedWrites() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed {
+		return ErrTableClosed
+	}
+	t.writeBuffered = true
+	return nil
+}
+
+func (t *Table) DisableBufferedWrites() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed {
+		return ErrTableClosed
+	}
+	if err := t.flushLocked(); err != nil {
+		return err
+	}
+	t.writeBuffered = false
+	return nil
+}
+
+func (t *Table) Flush() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.closed {
+		return ErrTableClosed
+	}
+	return t.flushLocked()
 }
 
 func (t *Table) Stats() (Stats, error) {
@@ -275,7 +324,7 @@ func (t *Table) Stats() (Stats, error) {
 	stats.BucketsCount = len(unique)
 
 	for bucketID := range unique {
-		bucket, err := loadBucket(t.bucketPath(bucketID))
+		bucket, err := t.loadBucketState(bucketID)
 		if err != nil {
 			return Stats{}, err
 		}
@@ -286,6 +335,15 @@ func (t *Table) Stats() (Stats, error) {
 			stats.MaxBucketLoad = load
 		}
 
+		if _, dirty := t.dirtyBuckets[bucketID]; dirty {
+			data, err := json.Marshal(bucket)
+			if err != nil {
+				return Stats{}, err
+			}
+			stats.DiskBytes += int64(len(data))
+			continue
+		}
+
 		info, err := os.Stat(t.bucketPath(bucketID))
 		if err != nil {
 			return Stats{}, err
@@ -293,11 +351,19 @@ func (t *Table) Stats() (Stats, error) {
 		stats.DiskBytes += info.Size()
 	}
 
-	metaInfo, err := os.Stat(t.metadataPath())
-	if err != nil {
-		return Stats{}, err
+	if t.metaDirty {
+		data, err := json.Marshal(t.meta)
+		if err != nil {
+			return Stats{}, err
+		}
+		stats.DiskBytes += int64(len(data))
+	} else {
+		metaInfo, err := os.Stat(t.metadataPath())
+		if err != nil {
+			return Stats{}, err
+		}
+		stats.DiskBytes += metaInfo.Size()
 	}
-	stats.DiskBytes += metaInfo.Size()
 
 	return stats, nil
 }
@@ -323,6 +389,7 @@ func (t *Table) splitBucket(bucket Bucket) error {
 	if bucket.LocalDepth == t.meta.GlobalDepth {
 		t.meta.Directory = append(t.meta.Directory, append([]int(nil), t.meta.Directory...)...)
 		t.meta.GlobalDepth++
+		t.metaDirty = true
 	}
 
 	newBucket := Bucket{
@@ -331,6 +398,7 @@ func (t *Table) splitBucket(bucket Bucket) error {
 		Records:    make([]Record, 0),
 	}
 	t.meta.NextBucketID++
+	t.metaDirty = true
 
 	bucket.LocalDepth++
 	oldRecords := append([]Record(nil), bucket.Records...)
@@ -353,19 +421,19 @@ func (t *Table) splitBucket(bucket Bucket) error {
 		}
 	}
 
-	if err := saveBucket(t.bucketPath(bucket.ID), bucket); err != nil {
+	if err := t.saveBucketState(bucket); err != nil {
 		return err
 	}
-	if err := saveBucket(t.bucketPath(newBucket.ID), newBucket); err != nil {
+	if err := t.saveBucketState(newBucket); err != nil {
 		return err
 	}
 
-	return t.saveMetadata()
+	return t.persistMetadata()
 }
 
 func (t *Table) tryMerge(bucketID int) error {
 	for {
-		bucket, err := loadBucket(t.bucketPath(bucketID))
+		bucket, err := t.loadBucketState(bucketID)
 		if err != nil {
 			return err
 		}
@@ -394,7 +462,7 @@ func (t *Table) tryMerge(bucketID int) error {
 			break
 		}
 
-		buddy, err := loadBucket(t.bucketPath(buddyID))
+		buddy, err := t.loadBucketState(buddyID)
 		if err != nil {
 			return err
 		}
@@ -425,11 +493,12 @@ func (t *Table) tryMerge(bucketID int) error {
 				}
 			}
 		}
+		t.metaDirty = true
 
-		if err := saveBucket(t.bucketPath(survivor.ID), survivor); err != nil {
+		if err := t.saveBucketState(survivor); err != nil {
 			return err
 		}
-		if err := os.Remove(t.bucketPath(victim.ID)); err != nil && !os.IsNotExist(err) {
+		if err := t.deleteBucketState(victim.ID); err != nil {
 			return err
 		}
 
@@ -439,7 +508,7 @@ func (t *Table) tryMerge(bucketID int) error {
 		}
 	}
 
-	return t.saveMetadata()
+	return t.persistMetadata()
 }
 
 func (t *Table) shrinkDirectory() error {
@@ -460,6 +529,7 @@ func (t *Table) shrinkDirectory() error {
 
 		t.meta.Directory = append([]int(nil), t.meta.Directory[:half]...)
 		t.meta.GlobalDepth--
+		t.metaDirty = true
 	}
 
 	return nil
@@ -509,6 +579,86 @@ func saveBucket(path string, bucket Bucket) error {
 	}
 
 	return os.Rename(tmp, path)
+}
+
+func (t *Table) loadBucketState(id int) (Bucket, error) {
+	if bucket, ok := t.bucketCache[id]; ok {
+		return bucket, nil
+	}
+
+	bucket, err := loadBucket(t.bucketPath(id))
+	if err != nil {
+		return Bucket{}, err
+	}
+
+	if t.writeBuffered {
+		t.bucketCache[id] = bucket
+	}
+
+	return bucket, nil
+}
+
+func (t *Table) saveBucketState(bucket Bucket) error {
+	if t.writeBuffered {
+		t.bucketCache[bucket.ID] = bucket
+		delete(t.deletedBucket, bucket.ID)
+		t.dirtyBuckets[bucket.ID] = struct{}{}
+		return nil
+	}
+	return saveBucket(t.bucketPath(bucket.ID), bucket)
+}
+
+func (t *Table) deleteBucketState(id int) error {
+	if t.writeBuffered {
+		delete(t.bucketCache, id)
+		delete(t.dirtyBuckets, id)
+		t.deletedBucket[id] = struct{}{}
+		return nil
+	}
+	if err := os.Remove(t.bucketPath(id)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (t *Table) persistMetadata() error {
+	if t.writeBuffered {
+		t.metaDirty = true
+		return nil
+	}
+	return t.saveMetadata()
+}
+
+func (t *Table) flushLocked() error {
+	for id := range t.deletedBucket {
+		if err := os.Remove(t.bucketPath(id)); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+
+	for id := range t.dirtyBuckets {
+		bucket, ok := t.bucketCache[id]
+		if !ok {
+			continue
+		}
+		if err := saveBucket(t.bucketPath(id), bucket); err != nil {
+			return err
+		}
+	}
+
+	if t.metaDirty {
+		if err := t.saveMetadata(); err != nil {
+			return err
+		}
+	}
+
+	t.metaDirty = false
+	t.dirtyBuckets = make(map[int]struct{})
+	t.deletedBucket = make(map[int]struct{})
+	if !t.writeBuffered {
+		t.bucketCache = make(map[int]Bucket)
+	}
+	return nil
 }
 
 func bucketFileName(id int) string {

@@ -81,6 +81,46 @@ func TestTable_PersistsDataBetweenReopen(t *testing.T) {
 	assertLookup(t, reopened, "carol", "300", true)
 }
 
+func TestTable_BufferedWritesFlushAndPersist(t *testing.T) {
+	tablePath := filepath.Join(t.TempDir(), "table")
+	table := openTable(t, tablePath, 2)
+
+	if err := table.EnableBufferedWrites(); err != nil {
+		t.Fatalf("EnableBufferedWrites failed: %v", err)
+	}
+	if err := table.Insert("alice", "100"); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if err := table.Insert("bob", "200"); err != nil {
+		t.Fatalf("Insert failed: %v", err)
+	}
+	if err := table.Update("alice", "150"); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	if err := table.Delete("bob"); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	assertLookup(t, table, "alice", "150", true)
+	assertLookup(t, table, "bob", "", false)
+
+	if err := table.Flush(); err != nil {
+		t.Fatalf("Flush failed: %v", err)
+	}
+	if err := table.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	reopened, err := Open(tablePath, 2)
+	if err != nil {
+		t.Fatalf("Open after flush failed: %v", err)
+	}
+	defer reopened.Close()
+
+	assertLookup(t, reopened, "alice", "150", true)
+	assertLookup(t, reopened, "bob", "", false)
+}
+
 func TestTable_SplitsWhenBucketOverflows(t *testing.T) {
 	table := openTable(t, filepath.Join(t.TempDir(), "table"), 2)
 

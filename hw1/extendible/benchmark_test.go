@@ -19,12 +19,16 @@ func BenchmarkTableInsert(b *testing.B) {
 			runBatchBenchmark(b, size, func(b *testing.B, tablePath string) {
 				table := openBenchmarkTable(b, tablePath)
 				defer table.Close()
+				enableBufferedWrites(b, table)
 
 				b.StartTimer()
 				for _, pair := range pairs {
 					if err := table.Insert(pair.key, pair.value); err != nil {
 						b.Fatalf("Insert(%q) failed: %v", pair.key, err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("Flush failed: %v", err)
 				}
 				b.StopTimer()
 			})
@@ -39,11 +43,15 @@ func BenchmarkTableUpdate(b *testing.B) {
 			runBatchBenchmark(b, size, func(b *testing.B, tablePath string) {
 				table := openBenchmarkTable(b, tablePath)
 				defer table.Close()
+				enableBufferedWrites(b, table)
 
 				for _, pair := range pairs {
 					if err := table.Insert(pair.key, "initial"); err != nil {
 						b.Fatalf("prepare insert failed: %v", err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("prepare flush failed: %v", err)
 				}
 
 				b.StartTimer()
@@ -51,6 +59,9 @@ func BenchmarkTableUpdate(b *testing.B) {
 					if err := table.Update(pair.key, pair.value); err != nil {
 						b.Fatalf("Update(%q) failed: %v", pair.key, err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("Flush failed: %v", err)
 				}
 				b.StopTimer()
 			})
@@ -65,11 +76,15 @@ func BenchmarkTableGet(b *testing.B) {
 			runBatchBenchmark(b, size, func(b *testing.B, tablePath string) {
 				table := openBenchmarkTable(b, tablePath)
 				defer table.Close()
+				enableBufferedWrites(b, table)
 
 				for _, pair := range pairs {
 					if err := table.Insert(pair.key, pair.value); err != nil {
 						b.Fatalf("prepare insert failed: %v", err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("prepare flush failed: %v", err)
 				}
 
 				b.StartTimer()
@@ -95,11 +110,15 @@ func BenchmarkTableDelete(b *testing.B) {
 			runBatchBenchmark(b, size, func(b *testing.B, tablePath string) {
 				table := openBenchmarkTable(b, tablePath)
 				defer table.Close()
+				enableBufferedWrites(b, table)
 
 				for _, pair := range pairs {
 					if err := table.Insert(pair.key, pair.value); err != nil {
 						b.Fatalf("prepare insert failed: %v", err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("prepare flush failed: %v", err)
 				}
 
 				b.StartTimer()
@@ -107,6 +126,9 @@ func BenchmarkTableDelete(b *testing.B) {
 					if err := table.Delete(pair.key); err != nil {
 						b.Fatalf("Delete(%q) failed: %v", pair.key, err)
 					}
+				}
+				if err := table.Flush(); err != nil {
+					b.Fatalf("Flush failed: %v", err)
 				}
 				b.StopTimer()
 			})
@@ -171,6 +193,14 @@ func openBenchmarkTable(b testing.TB, tablePath string) *Table {
 		b.Fatalf("Open benchmark table failed: %v", err)
 	}
 	return table
+}
+
+func enableBufferedWrites(b testing.TB, table *Table) {
+	b.Helper()
+
+	if err := table.EnableBufferedWrites(); err != nil {
+		b.Fatalf("EnableBufferedWrites failed: %v", err)
+	}
 }
 
 func runBatchBenchmark(b *testing.B, batchSize int, fn func(b *testing.B, tablePath string)) {
