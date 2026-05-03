@@ -13,18 +13,32 @@ OPERATION_CONFIG = {
             ("get", "get", "#2ca02c"),
             ("delete", "delete", "#d62728"),
         ],
+        "raw": [
+            ("insert", "insert", "#1f77b4"),
+            ("update", "update", "#ff7f0e"),
+            ("get", "get", "#2ca02c"),
+            ("delete", "delete", "#d62728"),
+        ],
         "title": "extendible hashing on filesystem buckets",
     },
     "perfect": {
         "time": [
             ("build", "build", "#1f77b4"),
-            ("get", "get hit", "#2ca02c"),
-            ("get_miss", "get miss", "#d62728"),
+        ],
+        "raw": [
+            ("build", "build", "#1f77b4"),
+            ("get", "get", "#2ca02c"),
         ],
         "title": "perfect hash for a fixed key set",
     },
     "lsh": {
         "time": [
+            ("build", "build", "#1f77b4"),
+            ("add", "add", "#ff7f0e"),
+            ("search", "search", "#2ca02c"),
+            ("fullscan", "full scan", "#d62728"),
+        ],
+        "raw": [
             ("build", "build", "#1f77b4"),
             ("add", "add", "#ff7f0e"),
             ("search", "search", "#2ca02c"),
@@ -96,6 +110,52 @@ def maybe_set_log_scale(ax, values, axis: str) -> None:
             ax.set_yscale("log")
 
 
+def load_get_report(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    numeric_columns = ["rows", "iterations", "get_sec", "get_avg_sec", "get_ci95_avg_sec", "get_ops_sec"]
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(df[column], errors="raise")
+    return df.sort_values("rows")
+
+
+def plot_perfect_time(summary_dir: Path, raw_dir: Path, out_dir: Path) -> None:
+    build_summary = summary_dir / "build_summary.tsv"
+    if build_summary.exists():
+        fig, ax = plt.subplots()
+        df = load_tsv(build_summary, ["size", "mean", "ci", "runs"]).sort_values("size")
+        x = df["size"].to_numpy()
+        y = df["mean"].to_numpy()
+        ci = df["ci"].to_numpy()
+
+        ax.plot(x, y, marker="o", linewidth=2.4, color="#1f77b4", label="build")
+        ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#1f77b4")
+        maybe_set_log_scale(ax, x, "x")
+        set_size_ticks(ax, x)
+        ax.set_xlabel("dataset size")
+        ax.set_ylabel("build ns/op")
+        ax.set_title("perfect hash build: mean and 95% ci")
+        ax.legend(loc="upper left")
+        save(fig, out_dir / "build_time_pretty.png")
+
+    get_report = raw_dir / "get_report.csv"
+    if get_report.exists():
+        fig, ax = plt.subplots()
+        df = load_get_report(get_report)
+        x = df["rows"].to_numpy()
+        y = (df["get_avg_sec"] * 1e9).to_numpy()
+        ci = (df["get_ci95_avg_sec"] * 1e9).to_numpy()
+
+        ax.plot(x, y, marker="o", linewidth=2.4, color="#2ca02c", label="get")
+        ax.fill_between(x, y - ci, y + ci, alpha=0.18, color="#2ca02c")
+        maybe_set_log_scale(ax, x, "x")
+        set_size_ticks(ax, x)
+        ax.set_xlabel("dataset size")
+        ax.set_ylabel("get ns/op")
+        ax.set_title("perfect hash get: mean and 95% ci")
+        ax.legend(loc="upper left")
+        save(fig, out_dir / "get_time_pretty.png")
+
+
 def plot_time(summary_dir: Path, out_dir: Path, algo: str) -> None:
     fig, ax = plt.subplots()
     used_sizes = []
@@ -129,7 +189,7 @@ def plot_raw_metric(raw_dir: Path, out_dir: Path, algo: str, metric: str, out_na
     fig, ax = plt.subplots()
     used_sizes = []
 
-    for operation, label, color in OPERATION_CONFIG[algo]["time"]:
+    for operation, label, color in OPERATION_CONFIG[algo]["raw"]:
         raw_path = raw_dir / f"{operation}_runs.tsv"
         if not raw_path.exists():
             continue
@@ -164,7 +224,13 @@ def main() -> None:
     out_dir = require_env("HW1_OUT_DIR")
 
     setup_style()
-    plot_time(summary_dir, out_dir, algo)
+    if algo == "perfect":
+        legacy_plot = out_dir / "time_pretty.png"
+        if legacy_plot.exists():
+            legacy_plot.unlink()
+        plot_perfect_time(summary_dir, raw_dir, out_dir)
+    else:
+        plot_time(summary_dir, out_dir, algo)
     plot_raw_metric(raw_dir, out_dir, algo, "allocs", "allocs_pretty.png", "allocs/op")
     plot_raw_metric(raw_dir, out_dir, algo, "bytes", "bytes_pretty.png", "B/op")
 

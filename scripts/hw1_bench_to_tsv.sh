@@ -26,8 +26,26 @@ append_result() {
   } >> "${file}"
 }
 
-while read -r name iter nsop _ bytes _ allocs _; do
-  [[ "${name}" == Benchmark* ]] || continue
+while IFS= read -r line; do
+  [[ "${line}" == Benchmark* ]] || continue
+
+  read -r -a fields <<< "${line}"
+  name="${fields[0]}"
+  iter="${fields[1]}"
+  nsop="${fields[2]}"
+  bytes=""
+  allocs=""
+
+  for ((i = 0; i < ${#fields[@]}; i++)); do
+    if [[ "${fields[i]}" == "B/op" && $i -gt 0 ]]; then
+      bytes="${fields[i-1]}"
+    fi
+    if [[ "${fields[i]}" == "allocs/op" && $i -gt 0 ]]; then
+      allocs="${fields[i-1]}"
+    fi
+  done
+
+  [[ -n "${bytes}" && -n "${allocs}" ]] || continue
 
   case "${algo}:${name}" in
     extendible:BenchmarkTableInsert/size=*)
@@ -59,11 +77,6 @@ while read -r name iter nsop _ bytes _ allocs _; do
       size="${name#BenchmarkTableGet/size=}"
       size="${size%-*}"
       append_result "${output_dir}/get_runs.tsv" "${size}" "${nsop}" "${bytes}" "${allocs}"
-      ;;
-    perfect:BenchmarkTableGetMiss/size=*)
-      size="${name#BenchmarkTableGetMiss/size=}"
-      size="${size%-*}"
-      append_result "${output_dir}/get_miss_runs.tsv" "${size}" "${nsop}" "${bytes}" "${allocs}"
       ;;
     lsh:BenchmarkTableBuild/size=*)
       size="${name#BenchmarkTableBuild/size=}"

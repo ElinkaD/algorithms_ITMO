@@ -19,6 +19,8 @@ endif
 
 BENCH_RUNS ?= 4
 BENCH_TIME ?= 3x
+GET_BENCH_ITERS ?= 100
+GET_COUNT_PER_ITER ?= 100000
 PROFILE_SIZE ?= 100000
 GOMAXPROCS ?= 2
 WARMUP_TIME ?= 1x
@@ -32,6 +34,7 @@ SUMMARY_DIR := $(METRICS_DIR)/summary
 PLOT_DIR := ../graphs/hw1/$(ALGO)
 PROFILE_DIR := $(ARTIFACTS_DIR)/profiles
 TESTBIN := $(PROFILE_DIR)/$(ALGO).test
+GET_REPORT := $(RAW_DIR)/get_report.csv
 
 CPU_PROFILE := $(PROFILE_DIR)/$(ALGO)_$(PROFILE_SIZE).cpu.prof
 MEM_PROFILE := $(PROFILE_DIR)/$(ALGO)_$(PROFILE_SIZE).mem.prof
@@ -48,7 +51,7 @@ else
 PROFILE_BENCH ?= ^BenchmarkTableInsert$$
 endif
 
-.PHONY: test test-short bench warmup bench-save collect plot metrics profile cpuprofile memprofile testbin profile-web cpu-web mem-web framegraph-paths clean dirs
+.PHONY: test test-short bench warmup bench-save collect plot metrics profile cpuprofile memprofile testbin profile-web cpu-web mem-web framegraph-paths clean dirs get-report
 
 test:
 	env GOMAXPROCS=$(GOMAXPROCS) GOCACHE=$(GOCACHE) $(GO) test ./...
@@ -61,12 +64,15 @@ dirs:
 
 bench:
 	env GOMAXPROCS=$(GOMAXPROCS) GOCACHE=$(GOCACHE) SIZES='$(SIZES)' $(GO) test $(PKG) -run '^$$' -bench '^BenchmarkTable' -benchmem -benchtime $(BENCH_TIME)
+ifeq ($(ALGO),perfect)
+	env GOMAXPROCS=$(GOMAXPROCS) GOCACHE=$(GOCACHE) RUN_GET_REPORT=1 SIZES='$(SIZES)' BENCH_ITERS='$(GET_BENCH_ITERS)' GET_COUNT_PER_ITER='$(GET_COUNT_PER_ITER)' $(GO) test $(PKG) -run '^TestPerfectGetReport$$' -count=1
+endif
 
 warmup:
 	env GOMAXPROCS=$(GOMAXPROCS) GOCACHE=$(GOCACHE) SIZES='$(WARMUP_SIZES)' $(GO) test $(PKG) -run '^$$' -bench '^BenchmarkTable' -benchmem -benchtime $(WARMUP_TIME) > /dev/null
 
 bench-save: dirs
-	rm -f $(RAW_DIR)/*.txt $(RAW_DIR)/*_runs.tsv $(SUMMARY_DIR)/*.tsv
+	rm -f $(RAW_DIR)/*.txt $(RAW_DIR)/*_runs.tsv $(RAW_DIR)/*.csv $(SUMMARY_DIR)/*.tsv
 	$(MAKE) warmup ALGO=$(ALGO) WARMUP_SIZES='$(WARMUP_SIZES)' GOMAXPROCS='$(GOMAXPROCS)' GOCACHE='$(GOCACHE)' WARMUP_TIME='$(WARMUP_TIME)'
 	for run in $$(seq 1 $(BENCH_RUNS)); do \
 		echo "run $$run/$(BENCH_RUNS)"; \
@@ -74,9 +80,15 @@ bench-save: dirs
 		../scripts/hw1_bench_to_tsv.sh $(ALGO) $$run $(RAW_DIR)/bench_run_$${run}.txt $(RAW_DIR); \
 	done
 	../scripts/hw1_aggregate_bench.sh $(RAW_DIR) $(SUMMARY_DIR)
+ifeq ($(ALGO),perfect)
+	$(MAKE) get-report ALGO=$(ALGO) SIZES='$(SIZES)' GOMAXPROCS='$(GOMAXPROCS)' GOCACHE='$(GOCACHE)' GET_BENCH_ITERS='$(GET_BENCH_ITERS)' GET_COUNT_PER_ITER='$(GET_COUNT_PER_ITER)'
+endif
 
 collect:
 	../scripts/hw1_aggregate_bench.sh $(RAW_DIR) $(SUMMARY_DIR)
+
+get-report: dirs
+	env GOMAXPROCS=$(GOMAXPROCS) GOCACHE=$(GOCACHE) RUN_GET_REPORT=1 SIZES='$(SIZES)' BENCH_ITERS='$(GET_BENCH_ITERS)' GET_COUNT_PER_ITER='$(GET_COUNT_PER_ITER)' GET_REPORT_OUT='$(CURDIR)/$(GET_REPORT)' $(GO) test $(PKG) -run '^TestPerfectGetReport$$' -count=1
 
 plot: dirs
 	../scripts/ensure_graphs_venv.sh
