@@ -1,0 +1,2 @@
+corpus_name,docs,raw_docids_bytes,raw_freqs_bytes,raw_positions_bytes,raw_total_bytes,compressed_docids_bytes,compressed_freqs_bytes,compressed_positions_bytes,compressed_skip_bytes,compressed_dictionary_bytes,compressed_docnorms_bytes,compressed_titles_bytes,compressed_total_bytes,segment_file_size_bytes,compression_ratio,space_saving_percent
+synthetic,5000,2208992,2208992,4066412,8484396,731998,552248,3168581,444548,1061551,19233,128768,6106927,6745154,1.3893,28.02

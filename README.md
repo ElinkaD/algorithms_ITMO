@@ -66,3 +66,30 @@
 * результаты бенчмарков
 * графики по измерениям
 * отчет с анализом полученных результатов
+
+## Пятое дз — Inverted Index
+
+### Что реализовано:
+
+* координатный обратный индекс `term -> posting list`;
+* операции `AND`, `OR`, `NOT` в связке с положительным выражением, `ADJ`, `NEAR/k`;
+* mmap segment с header, dictionary, postings, doc norms и titles;
+* сжатие posting lists через delta-encoding, PForDelta и bitpacking;
+* ранжирование TF-IDF и BM25;
+* benchmark smoke mode, Go benchmarks и профилирование.
+
+### Команды запуска:
+
+```bash
+cd hw5
+make demo
+make test
+make bench
+make bench-smoke
+cd ..
+DOWNLOAD=1 TARGET_GB=6 scripts/hw5_prepare_wiki_sample.sh
+cd hw5
+make bench-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
+```
+
+В текущем отчете замеры сделаны на частично скачанном Wikipedia JSONL примерно `1.4-1.5 GB`; команда с `TARGET_GB=6` нужна, чтобы позже догрузить более крупный корпус тем же пайплайном.

@@ -1,0 +1,31 @@
+query,hits,topK,boolean_only_latency_ms,tfidf_latency_ms,bm25_latency_ms,tfidf_overhead_percent,bm25_overhead_percent,top1_doc_id_tfidf,top1_doc_id_bm25,top1_title_tfidf,top1_title_bm25
+equality AND rights,104,10,0.0960,0.0820,0.1210,85.4167,126.0417,10113,10113,Egalitarianism,Egalitarianism
+female AND scientists,91,10,0.0790,0.0870,0.2860,110.1266,362.0253,6910,6910,Cloning,Cloning
+feminism AND women,33,10,0.0490,0.1030,0.0760,210.2041,155.1020,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
+feminist AND movement,54,10,0.0720,0.0500,0.0780,69.4444,108.3333,2834,2956,A Vindication of the Rights of Woman,Ain't I a Woman? (book)
+women AND education,440,10,0.2330,0.3610,0.5040,154.9356,216.3090,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
+women AND rights,409,10,0.2210,0.2380,0.4890,107.6923,221.2670,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
+women AND science,329,10,0.1740,0.2050,0.3940,117.8161,226.4368,974,8623,Ada Lovelace,Dava Sobel
+women AND suffrage,57,10,0.0510,0.0430,0.0680,84.3137,133.3333,7959,9695,Democracy,Elizabeth Garrett Anderson
+women AND university,671,10,0.3680,0.3810,0.7980,103.5326,216.8478,4157,7611,Brown University,Crystal Eastman
+women AND vote,217,10,0.1210,0.1230,0.2250,101.6529,185.9504,7490,7490,Civil Rights Act,Civil Rights Act
+back,1962,10,0.0000,0.5400,1.2470,0.0000,0.0000,1690,1690,Amati,Amati
+english,1978,10,0.0010,0.5280,1.1130,52800.0000,111300.0000,6340,4179,Canadian English,British English
+feminism AND women,33,10,0.0420,0.0230,0.0480,54.7619,114.2857,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
+further,1976,10,0.0000,0.5210,1.0050,0.0000,0.0000,4820,8839,Balfour Declaration,London Docklands
+important,1970,10,0.0000,0.5180,1.0170,0.0000,0.0000,10331,10331,Ancient Egyptian religion,Ancient Egyptian religion
+less,1993,10,0.0010,0.5160,0.9930,51600.0000,99300.0000,6579,6579,Carbine,Carbine
+period,1996,10,0.0010,0.5460,1.1120,54600.0000,111200.0000,2085,9300,Assyria,Ediacaran
+university,1983,10,0.0000,0.5380,1.0050,0.0000,0.0000,5689,5689,College,College
+women AND rights,409,10,0.2360,0.2140,0.5430,90.6780,230.0847,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
+women AND science,329,10,0.2560,0.2100,0.5090,82.0312,198.8281,974,8623,Ada Lovelace,Dava Sobel
+education,1033,10,0.0000,0.3280,0.6750,0.0000,0.0000,9252,9252,Education,Education
+equality,219,10,0.0010,0.0740,0.1380,7400.0000,13800.0000,10113,10113,Egalitarianism,Egalitarianism
+feminism,38,10,0.0000,0.0170,0.0270,0.0000,0.0000,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
+feminist,97,10,0.0000,0.0390,0.0640,0.0000,0.0000,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
+rights,931,10,0.0000,0.2950,0.5680,0.0000,0.0000,7490,8217,Civil Rights Act,Declaration of the Rights of Man and of the Citizen
+scientist,431,10,0.0000,0.1220,0.2750,0.0000,0.0000,7786,6462,Challenger Deep,"Church of Christ, Scientist"
+scientists,504,10,0.0010,0.1730,0.2990,17300.0000,29900.0000,2787,3017,Astrobiology,Alexey Pajitnov
+suffrage,88,10,0.0010,0.0320,0.0540,3200.0000,5400.0000,7959,9695,Democracy,Elizabeth Garrett Anderson
+vote,431,10,0.0000,0.1330,0.2390,0.0000,0.0000,7490,1857,Civil Rights Act,Approval voting
+women,1056,10,0.0000,0.3210,0.6080,0.0000,0.0000,10620,10620,List of female tennis players,List of female tennis players
