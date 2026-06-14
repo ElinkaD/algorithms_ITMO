@@ -46,31 +46,8 @@ type QueryLatency struct {
 	AvgLatencyMS       float64
 	AvgLatencyCILow    float64
 	AvgLatencyCIHigh   float64
-	P50LatencyMS       float64
-	P95LatencyMS       float64
-	MinLatencyMS       float64
-	MaxLatencyMS       float64
 	QPS                float64
-	QPSCILow           float64
-	QPSCIHigh          float64
-	AllocBytesPerQuery uint64
 	AllocsPerQuery     uint64
-}
-
-type MmapVsMemory struct {
-	Docs                int
-	Query               string
-	OperatorType        string
-	MemoryLatencyMS     float64
-	MemoryLatencyCILow  float64
-	MemoryLatencyCIHigh float64
-	MmapLatencyMS       float64
-	MmapLatencyCILow    float64
-	MmapLatencyCIHigh   float64
-	MmapToMemoryRatio   float64
-	MemoryHits          int
-	MmapHits            int
-	ResultsEqual        bool
 }
 
 type RankingStats struct {

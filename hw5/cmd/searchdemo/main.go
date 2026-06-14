@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "demo", "demo|build|search|repl|bench-smoke|build-wiki|build-wiki-shards|wiki-stats|wiki-scale-stats|wiki-report-scale-stats|prepare-wiki-queries|bench-query-wiki|bench-query-wiki-shards|compression-stats-wiki|compression-stats-synthetic|bench-mmap-vs-memory|bench-ranking-wiki|bench-build-wiki|bench-wiki")
+	mode := flag.String("mode", "demo", "demo|build|search|repl|bench-smoke|build-wiki|build-wiki-shards|wiki-stats|wiki-scale-stats|wiki-report-scale-stats|prepare-wiki-queries|bench-query-wiki|bench-query-wiki-shards|compression-stats-wiki|compression-stats-synthetic|bench-ranking-wiki|bench-build-wiki|bench-wiki|profile-workload")
 	docs := flag.Int("docs", 5000, "number of synthetic documents")
 	indexPath := flag.String("index", "./data/index.seg", "segment path")
 	halfIndexPath := flag.String("half-index", "./data/wiki_shards/prefix-417728", "half-dataset shard directory")
@@ -36,6 +37,10 @@ func main() {
 	shardLimit := flag.Int("shard-limit", 0, "limit number of shard segments to open; 0 means all")
 	queriesPerType := flag.Int("queries-per-type", 10, "generated query count per operator type")
 	querySampleDocs := flag.Int("query-sample-docs", 10000, "wiki documents used to generate sharded query suite")
+	profileScenario := flag.String("profile-scenario", "wiki-near-query", "wiki-near-query|wiki-complex-query|wiki-bm25-topk|wiki-mmap-materialize-near|wiki-mmap-lookup")
+	profileKind := flag.String("profile-kind", "cpu", "cpu|mem")
+	profileOutput := flag.String("profile-output", "", "path to .out profile")
+	profileIterations := flag.Int("profile-iterations", 100, "iterations for profile-workload")
 	flag.Parse()
 
 	var err error
@@ -72,12 +77,12 @@ func main() {
 		err = runCompressionStatsWiki(*input, *limit, *indexPath)
 	case "compression-stats-synthetic":
 		err = runCompressionStatsSynthetic(*docs)
-	case "bench-mmap-vs-memory":
-		err = runBenchMmapVsMemory(*input, *limit, *indexPath, *iterations)
 	case "bench-ranking-wiki":
 		err = runBenchRankingWiki(*input, *limit, *indexPath, *topK, *iterations)
 	case "bench-wiki":
 		err = runBenchWiki(*input, *limit, *indexPath, *iterations, *topK)
+	case "profile-workload":
+		err = runProfileWorkload(*input, *limit, *indexPath, *profileScenario, *profileKind, *profileOutput, *profileIterations)
 	default:
 		err = fmt.Errorf("unknown mode %q", *mode)
 	}
@@ -491,33 +496,18 @@ func measureShardedQuery(readers []*storage.MmapSegmentReader, spec benchdata.Qu
 	sort.Float64s(durations)
 	avg := mean(durations)
 	avgLow, avgHigh := labbench.CI95(durations)
-	qps := 0.0
-	if avg > 0 {
-		qps = 1000 / avg
+		qps := 0.0
+		if avg > 0 {
+			qps = 1000 / avg
+		}
+		row.Hits = hits
+		row.AvgLatencyMS = avg
+		row.AvgLatencyCILow = avgLow
+		row.AvgLatencyCIHigh = avgHigh
+		row.QPS = qps
+		row.AllocsPerQuery = (after.Mallocs - before.Mallocs) / uint64(iterations)
+		return row, nil
 	}
-	qpsLow := 0.0
-	qpsHigh := 0.0
-	if avgHigh > 0 {
-		qpsLow = 1000 / avgHigh
-	}
-	if avgLow > 0 {
-		qpsHigh = 1000 / avgLow
-	}
-	row.Hits = hits
-	row.AvgLatencyMS = avg
-	row.AvgLatencyCILow = avgLow
-	row.AvgLatencyCIHigh = avgHigh
-	row.P50LatencyMS = quantile(durations, 0.50)
-	row.P95LatencyMS = quantile(durations, 0.95)
-	row.MinLatencyMS = durations[0]
-	row.MaxLatencyMS = durations[len(durations)-1]
-	row.QPS = qps
-	row.QPSCILow = qpsLow
-	row.QPSCIHigh = qpsHigh
-	row.AllocBytesPerQuery = (after.TotalAlloc - before.TotalAlloc) / uint64(iterations)
-	row.AllocsPerQuery = (after.Mallocs - before.Mallocs) / uint64(iterations)
-	return row, nil
-}
 
 func executeShardedOnce(readers []*storage.MmapSegmentReader, rawQuery string) (int, error) {
 	node, err := query.Parse(rawQuery)
@@ -593,27 +583,165 @@ func runCompressionStatsSynthetic(docs int) error {
 	return nil
 }
 
-func runBenchMmapVsMemory(input string, limit int, indexPath string, iterations int) error {
+func runProfileWorkload(input string, limit int, indexPath, scenario, kind, output string, iterations int) error {
+	if output == "" {
+		return fmt.Errorf("profile-output is required")
+	}
+	if iterations <= 0 {
+		iterations = 100
+	}
+	workload, desc, err := prepareProfileWorkload(input, limit, indexPath, scenario)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(output), 0o755); err != nil {
+		return err
+	}
+	f, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	switch kind {
+	case "cpu":
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return err
+		}
+		for i := 0; i < iterations; i++ {
+			if err := workload(); err != nil {
+				pprof.StopCPUProfile()
+				return err
+			}
+		}
+		pprof.StopCPUProfile()
+	case "mem":
+		runtime.MemProfileRate = 1
+		for i := 0; i < iterations; i++ {
+			if err := workload(); err != nil {
+				return err
+			}
+		}
+		runtime.GC()
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown profile-kind %q", kind)
+	}
+
+	fmt.Printf("[profile-workload] scenario=%s kind=%s iterations=%d output=%s\n", scenario, kind, iterations, output)
+	fmt.Printf("[profile-workload] %s\n", desc)
+	return nil
+}
+
+func prepareProfileWorkload(input string, limit int, indexPath, scenario string) (func() error, string, error) {
 	r := labbench.NewRunner(input, limit)
 	r.IndexPath = indexPath
 	docs, idx, err := ensureWikiIndex(r)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	specs, err := r.LoadOrPrepareQueries(idx, docs)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
-	rows, err := r.BenchMmapVsMemory(idx, specs, iterations)
-	if err != nil {
-		return err
+	find := func(typ string) (benchdata.QuerySpec, error) {
+		for _, spec := range specs {
+			if spec.OperatorType == typ {
+				return spec, nil
+			}
+		}
+		return benchdata.QuerySpec{}, fmt.Errorf("no query of type %s", typ)
 	}
-	path := r.ResultPath("wiki_mmap_vs_memory.csv")
-	if err := labbench.WriteMmapVsMemory(path, rows); err != nil {
-		return err
+
+	switch scenario {
+	case "wiki-near-query":
+		spec, err := find("NEAR/3")
+		if err != nil {
+			return nil, "", err
+		}
+		node, err := query.Parse(spec.Query)
+		if err != nil {
+			return nil, "", err
+		}
+		return func() error {
+			_, err := query.Execute(idx, node)
+			return err
+		}, fmt.Sprintf("memory backend, query.Execute only, query=%q", spec.Query), nil
+	case "wiki-complex-query":
+		spec, err := find("COMPLEX")
+		if err != nil {
+			return nil, "", err
+		}
+		node, err := query.Parse(spec.Query)
+		if err != nil {
+			return nil, "", err
+		}
+		return func() error {
+			_, err := query.Execute(idx, node)
+			return err
+		}, fmt.Sprintf("memory backend, query.Execute only, query=%q", spec.Query), nil
+	case "wiki-bm25-topk":
+		spec, err := find("AND")
+		if err != nil {
+			return nil, "", err
+		}
+		node, err := query.Parse(spec.Query)
+		if err != nil {
+			return nil, "", err
+		}
+		pl, err := query.Execute(idx, node)
+		if err != nil {
+			return nil, "", err
+		}
+		terms := node.QueryTerms()
+		return func() error {
+			_ = scoring.TopK(idx, pl, terms, scoring.RankBM25, 10)
+			return nil
+		}, fmt.Sprintf("memory backend, TopK only after precomputed boolean filter, query=%q", spec.Query), nil
+	case "wiki-mmap-materialize-near":
+		spec, err := find("NEAR/3")
+		if err != nil {
+			return nil, "", err
+		}
+		node, err := query.Parse(spec.Query)
+		if err != nil {
+			return nil, "", err
+		}
+		reader, err := storage.Open(indexPath)
+		if err != nil {
+			return nil, "", err
+		}
+		terms := node.QueryTerms()
+		return func() error {
+			mmapIdx, err := reader.Materialize(terms)
+			if err != nil {
+				return err
+			}
+			_, err = query.Execute(mmapIdx, node)
+			return err
+		}, fmt.Sprintf("mmap backend, Materialize + query.Execute, query=%q", spec.Query), nil
+	case "wiki-mmap-lookup":
+		spec, err := find("TERM")
+		if err != nil {
+			return nil, "", err
+		}
+		if len(spec.Terms) == 0 {
+			return nil, "", fmt.Errorf("term query has no terms")
+		}
+		reader, err := storage.Open(indexPath)
+		if err != nil {
+			return nil, "", err
+		}
+		term := spec.Terms[0]
+		return func() error {
+			_, err := reader.LookupTerm(term)
+			return err
+		}, fmt.Sprintf("mmap backend, LookupTerm only, term=%q", term), nil
+	default:
+		return nil, "", fmt.Errorf("unknown profile-scenario %q", scenario)
 	}
-	fmt.Printf("[bench-mmap-vs-memory] written %s rows=%d\n", path, len(rows))
-	return nil
 }
 
 func runBenchRankingWiki(input string, limit int, indexPath string, topK int, iterations int) error {
@@ -653,9 +781,6 @@ func runBenchWiki(input string, limit int, indexPath string, iterations int, top
 		return err
 	}
 	if err := runBenchQueryWiki(input, limit, indexPath, iterations); err != nil {
-		return err
-	}
-	if err := runBenchMmapVsMemory(input, limit, indexPath, iterations); err != nil {
 		return err
 	}
 	return runBenchRankingWiki(input, limit, indexPath, topK, iterations)
@@ -860,19 +985,6 @@ func mean(values []float64) float64 {
 	return sum / float64(len(values))
 }
 
-func quantile(values []float64, q float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	pos := int(float64(len(values)-1) * q)
-	if pos < 0 {
-		pos = 0
-	}
-	if pos >= len(values) {
-		pos = len(values) - 1
-	}
-	return values[pos]
-}
 
 func ensureWikiIndex(r labbench.Runner) ([]index.Document, *index.MemoryIndex, error) {
 	docs, err := r.LoadDocs()

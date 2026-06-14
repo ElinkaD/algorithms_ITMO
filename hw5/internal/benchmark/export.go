@@ -56,27 +56,12 @@ func WriteQueryLatency(path string, rows []QueryLatency) error {
 	for _, row := range rows {
 		out = append(out, []string{
 			row.CorpusName, itoa(row.Docs), row.Query, row.OperatorType, row.RankMode, row.Backend,
-			itoa(row.Iterations), itoa(row.Hits), f(row.AvgLatencyMS), f(row.AvgLatencyCILow), f(row.AvgLatencyCIHigh), f(row.P50LatencyMS),
-			f(row.P95LatencyMS), f(row.MinLatencyMS), f(row.MaxLatencyMS), f(row.QPS), f(row.QPSCILow), f(row.QPSCIHigh),
-			strconv.FormatUint(row.AllocBytesPerQuery, 10), strconv.FormatUint(row.AllocsPerQuery, 10),
+			itoa(row.Iterations), itoa(row.Hits), f(row.AvgLatencyMS), f(row.AvgLatencyCILow), f(row.AvgLatencyCIHigh),
+			f(row.QPS), strconv.FormatUint(row.AllocsPerQuery, 10),
 		})
 	}
 	return writeCSV(path,
-		[]string{"corpus_name", "docs", "query", "operator_type", "rank_mode", "backend", "iterations", "hits", "avg_latency_ms", "avg_latency_ci_low_ms", "avg_latency_ci_high_ms", "p50_latency_ms", "p95_latency_ms", "min_latency_ms", "max_latency_ms", "qps", "qps_ci_low", "qps_ci_high", "alloc_bytes_per_query", "allocs_per_query"},
-		out)
-}
-
-func WriteMmapVsMemory(path string, rows []MmapVsMemory) error {
-	out := make([][]string, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, []string{
-			itoa(row.Docs), row.Query, row.OperatorType, f(row.MemoryLatencyMS), f(row.MemoryLatencyCILow), f(row.MemoryLatencyCIHigh),
-			f(row.MmapLatencyMS), f(row.MmapLatencyCILow), f(row.MmapLatencyCIHigh),
-			f(row.MmapToMemoryRatio), itoa(row.MemoryHits), itoa(row.MmapHits), strconv.FormatBool(row.ResultsEqual),
-		})
-	}
-	return writeCSV(path,
-		[]string{"docs", "query", "operator_type", "memory_latency_ms", "memory_latency_ci_low_ms", "memory_latency_ci_high_ms", "mmap_latency_ms", "mmap_latency_ci_low_ms", "mmap_latency_ci_high_ms", "mmap_to_memory_ratio", "memory_hits", "mmap_hits", "results_equal"},
+		[]string{"corpus_name", "docs", "query", "operator_type", "rank_mode", "backend", "iterations", "hits", "avg_latency_ms", "avg_latency_ci_low_ms", "avg_latency_ci_high_ms", "qps", "allocs_per_query"},
 		out)
 }
 

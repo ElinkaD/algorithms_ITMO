@@ -131,7 +131,7 @@ feminist ADJ movement
 
 ### Synthetic smoke
 
-Synthetic corpus оставлен только как быстрый smoke, а не как основной исследовательский корпус: в нем генерируются небольшие наборы на `1000/5000/10000` документов, документы имеют длину примерно `100-300` токенов, словарь около `10000` терминов, есть high-frequency/low-frequency слова и контролируемые фразы вроде `data pipeline`, `new york`, `machine learning`, `distributed systems`. Он нужен, чтобы быстро проверять `ADJ` и `NEAR`, когда не хочется каждый раз читать большой wiki-файл; в основных таблицах ниже используется Wikipedia.
+Synthetic corpus оставлен только как быстрый smoke, а не как основной исследовательский корпус: в нем генерируются небольшие наборы на `1000/5000/10000` документов, документы имеют длину примерно `100-300` токенов, словарь около `10000` терминов, есть high-frequency/low-frequency слова и контролируемые фразы вроде `data pipeline`, `new york`, `machine learning`, `distributed systems`. Он нужен, чтобы быстро проверять `ADJ` и `NEAR`, когда не хочется каждый раз читать большой wiki-файл. в основных таблицах ниже используется Wikipedia.
 
 ### Wikipedia
 
@@ -260,136 +260,46 @@ BM25 часто немного медленнее TF-IDF, потому что ф
 
 ![Allocs by operator](../../graphs/hw5/allocs_by_operator.png)
 
-По графику видно, что позиционные операции и сложные запросы создают больше временных структур, потому что им нужно декодировать positions и проверять расстояния между позициями.
+`UPDATE:` первоначально этот график был построен на старом прогоне и смешивал аллокации с объёмом RAM. После перепроверки я пересняла данные, пересобрала график. Для каждого запроса benchmark сохраняет allocs_per_query (по числу malloc на запрос), а на графике я усредняю это значение по типу оператора.
 
-## Memory index vs mmap segment
+ Позиционные операции и сложные запросы здесь ожидаемо дороже - им нужно декодировать `positions`, собирать промежуточные списки и проверять расстояния между позициями.
 
-Для проверки я сравнила результаты на одних и тех же 100 запросах.
+## Профили CPU
 
-В предварительном single-segment прогоне на 10к все результаты совпали.
+`UPDATE:` кроме старых `AND` и `OR` я добавила новые профили на более интересных сценариях: `NEAR`, `mmap + NEAR` и `BM25 topK`. Эти профили снимались уже без one-time setup внутри benchmark. сначала отдельно подготавливался fixture, а потом под `pprof` много раз запускался только целевой hot path.
 
-На 25к совпало `96/100` запросов. Все 4 расхождения относятся к `NEAR/3` по частотному терму `women`, то есть к самой чувствительной части с positions. Boolean, phrase, ranking-запросы и остальные proximity-запросы совпали. 
+### AND query
 
-| Docs | Queries | Memory latency, ms, mean ± 95% CI | mmap latency, ms, mean ± 95% CI | Results equal |
-| ---: | ---: | ---: | ---: | ---: |
-| 25 000 | 500 | 0.895 ± 0.057 | 8.584 ± 0.573 | 488 / 500 |
+![CPU profile AND](./profiles/cpu/cpu_and.png)
 
+видно пересечение posting list-ов и последующую сортировку промежуточных результатов.
 
-| query | memory ms | mmap ms | hits | equal |
-| --- | ---: | ---: | ---: | --- |
-| `women AND science` | 0.4532 | 6.7136 | 1704 | true |
-| `women NEAR/3 rights` | 0.3418 | 6.2512 | 391/393 | false |
-| `(women OR feminism) AND rights` | 1.4236 | 7.3700 | 2257 | true |
-| `"ada lovelace"` | 0.0138 | 1.2748 | 31 | true |
-| `"marie curie"` | 0.0294 | 1.6640 | 56 | true |
+### OR query
 
-![Memory vs mmap](../../graphs/hw5/mmap_vs_memory_latency.png)
+![CPU profile OR](./profiles/cpu/cpu_or.png)
 
-mmap почти всегда медленнее memory index, потому что memory index уже держит posting lists как готовые структуры, а mmap backend каждый раз достает нужные данные из segment-файла и декодирует их. Поэтому синие столбцы почти везде низкие, а оранжевые выше и иногда дают резкие пики.
+hot path идёт через объединение posting list-ов и работу `min-heap`. Поэтому этот запрос создаёт больше временных структур, чем обычное пересечение для `AND`.
 
-## Профилирование CPU и аллокаций
+### Clean CPU: NEAR query
 
-Для анализа узких мест дополнительно были сняты CPU- и memory-профили с помощью стандартного инструмента Go `pprof`. Профили строились для нескольких типов запросов: `AND`, `OR`, `NEAR/3` и `BM25_TOPK`. Эти запросы выбраны как представители разных сценариев выполнения: пересечение posting list-ов, объединение результатов, позиционный поиск и ранжирование документов.
+![CPU profile clean NEAR](./profiles/cpu/new_cpu_near.png)
 
-### Список снятых профилей
+ время уходит в `query.executeNear`, `PostingIterator.Advance`, `positionsNear` и сортировку позиций через `sort.Ints`(CPU тратится на positional matching и merge positions внутри найденных документов)
 
-Профилирование запускалось для benchmark-ов, уже реализованных в корневом пакете `hw5`. Для каждого benchmark-а сохранялись два профиля: CPU profile и memory profile. CPU-профили лежат в `reports/hw5/profiles/cpu/`, memory-профили — в `reports/hw5/profiles/mem/`.
+### Clean CPU: BM25 topK
 
-| benchmark | CPU profile | memory profile | что анализируется |
-| --- | --- | --- | --- |
-| `BenchmarkAndQuery` | `cpu/andquery.out` | `mem/andquery.out` | пересечение posting list-ов |
-| `BenchmarkOrQuery` | `cpu/orquery.out` | `mem/orquery.out` | объединение posting list-ов |
-| `BenchmarkNotQuery` | `cpu/notquery.out` | `mem/notquery.out` | отрицательный boolean-запрос |
-| `BenchmarkAdjQuery` | `cpu/adjquery.out` | `mem/adjquery.out` | позиционный оператор `ADJ` |
-| `BenchmarkNearQuery` | `cpu/nearquery.out` | `mem/nearquery.out` | позиционный оператор `NEAR/3` |
-| `BenchmarkBM25TopK` | `cpu/bm25topk.out` | `mem/bm25topk.out` | расчёт BM25 score и выбор top-K |
-| `BenchmarkWikiAndQuery` | `cpu/wikiandquery.out` | `mem/wikiandquery.out` | `AND`-запрос на Wikipedia corpus |
-| `BenchmarkWikiOrQuery` | `cpu/wikiorquery.out` | `mem/wikiorquery.out` | `OR`-запрос на Wikipedia corpus |
-| `BenchmarkWikiNearQuery` | `cpu/wikinearquery.out` | `mem/wikinearquery.out` | `NEAR/3`-запрос на Wikipedia corpus |
-| `BenchmarkWikiPhraseQuery` | `cpu/wikiphrasequery.out` | `mem/wikiphrasequery.out` | phrase-запрос на Wikipedia corpus |
-| `BenchmarkWikiComplexQuery` | `cpu/wikicomplexquery.out` | `mem/wikicomplexquery.out` | сложный комбинированный запрос |
-| `BenchmarkWikiBM25TopK` | `cpu/wikibm25topk.out` | `mem/wikibm25topk.out` | BM25 top-K на Wikipedia corpus |
-| `BenchmarkWikiTFIDFTopK` | `cpu/wikitfidftopk.out` | `mem/wikitfidftopk.out` | TF-IDF top-K на Wikipedia corpus |
-| `BenchmarkWikiMmapLookup` | `cpu/wikimmaplookup.out` | `mem/wikimmaplookup.out` | чтение posting list-а через mmap backend |
-| `BenchmarkWikiMemoryVsMmapAnd` | `cpu/wikimemoryvsmmapand.out` | `mem/wikimemoryvsmmapand.out` | сравнение memory и mmap backend для `AND`-запроса |
+![CPU profile clean BM25](./profiles/cpu/new_cpu_bm25-topk.png)
 
-Для каждого `.out`-профиля дополнительно сохранялась текстовая сводка `pprof -top` в файл с суффиксом `_top.txt`.
+после того как boolean-кандидаты уже готовы, ранжирование тратит CPU в основном на проход по postings, вычисление `tf/idf`-компонент и обращения к статистике термов
 
-### CPU profiles
+## Профили memory
 
-CPU-профили показывают, в каких функциях тратится основное процессорное время. В рамках поискового движка это позволяет проанализировать стоимость декодирования posting list-ов, пересечения и объединения списков документов, обработки позиционных операторов, heap merge и расчёта ranking score.
+`UPDATE:` для тех же новых сценариев я отдельно сняла memory flame graph в режиме `alloc_space`. NEAR query и BM25 topK имеют похожий профиль, потому что `alloc_space` накапливает суммарный объём выделенной памяти за время жизни процесса. Поэтому на flame graph заметен не только сам hot path запроса, но и one-time подготовка fixture, загрузка wiki и построение in-memory index. 
 
-#### CPU profile: `BenchmarkWikiAndQuery`
+### Memory: NEAR query (`alloc_space`)
 
-_Профиль пересечения posting list-ов на Wikipedia corpus._
+![Memory profile NEAR](./profiles/mem/near-query_flamegraph_alloc_space.png)
 
-![CPU profile: BenchmarkWikiAndQuery](../../graphs/hw5/profiles/cpu_wikiandquery.png)
+### Memory: BM25 topK (`alloc_space`)
 
-#### CPU profile: `BenchmarkWikiOrQuery`
-
-_Профиль объединения posting list-ов для `OR`-запроса._
-
-![CPU profile: BenchmarkWikiOrQuery](../../graphs/hw5/profiles/cpu_wikiorquery.png)
-
-#### CPU profile: `BenchmarkWikiNearQuery`
-
-_Профиль позиционного поиска `NEAR/3`, где дополнительно проверяются позиции термов._
-
-![CPU profile: BenchmarkWikiNearQuery](../../graphs/hw5/profiles/cpu_wikinearquery.png)
-
-#### CPU profile: `BenchmarkWikiBM25TopK`
-
-_Профиль ранжирования документов с использованием BM25._
-
-![CPU profile: BenchmarkWikiBM25TopK](../../graphs/hw5/profiles/cpu_wikibm25topk.png)
-
-### Memory profiles
-
-Memory-профили показывают heap-аллокации во время выполнения benchmark-а. Они позволяют понять, какие части query execution создают больше временных объектов и дают наибольшее allocation pressure.
-
-#### Memory profile: `BenchmarkWikiAndQuery`
-
-_Аллокации при пересечении posting list-ов._
-
-![Memory profile: BenchmarkWikiAndQuery](../../graphs/hw5/profiles/mem_wikiandquery.png)
-
-#### Memory profile: `BenchmarkWikiOrQuery`
-
-_Аллокации при объединении результатов для `OR`-запроса._
-
-![Memory profile: BenchmarkWikiOrQuery](../../graphs/hw5/profiles/mem_wikiorquery.png)
-
-#### Memory profile: `BenchmarkWikiNearQuery`
-
-_Аллокации при позиционном поиске `NEAR/3`._
-
-![Memory profile: BenchmarkWikiNearQuery](../../graphs/hw5/profiles/mem_wikinearquery.png)
-
-#### Memory profile: `BenchmarkWikiBM25TopK`
-
-_Аллокации при ранжировании BM25 top-K._
-
-![Memory profile: BenchmarkWikiBM25TopK](../../graphs/hw5/profiles/mem_wikibm25topk.png)
-
-Профилирование показывает две разные стороны производительности. CPU-профили помогают найти функции, где тратится основное процессорное время: декодирование posting list-ов, работа с positions, пересечение списков, heap merge и расчёт score. Memory-профили показывают allocation pressure, то есть какие части query execution создают больше временных объектов в heap.
-
-Важно, что memory profile в `pprof` показывает heap-аллокации, а не полный memory footprint процесса. Поэтому эти профили используются для анализа временных аллокаций при выполнении запросов. Для сравнения общего потребления памяти между memory index и mmap segment нужен отдельный замер RSS/heap после загрузки backend-а.
-
-## Где была сложность
-
-Самая неприятная часть здесь — не сам `AND`, а сочетание трех вещей:
-
-1. нужно сохранить positions, иначе `ADJ` и `NEAR` невозможны;
-2. positions резко увеличивают размер postings;
-3. после сжатия нужно уметь читать только нужный term из mmap segment-а.
-
-Из-за этого пришлось отдельно считать offsets в dictionary, отдельно кодировать docIds/freqs/positions и отдельно проверять, что memory и mmap дают одинаковые docId.
-
-Еще одна проблема была в benchmark-наборе. Если брать самые частотные слова Wikipedia, запросы становятся слишком шумными. Поэтому query suite теперь фильтрует стоп-слова и выбирает более нормальные термы средней частоты.
-
-## Что еще можно улучшить
-
-- добавить нормальный stop-word/stemming analyzer;
-- кешировать декодированные posting list-ы для mmap backend;
-- добавить замеры memory footprint: RSS/heap после загрузки memory index и после открытия mmap segment
-- разобраться с расхождениями NEAR/3 на DOCS=25000
+![Memory profile BM25](./profiles/mem/bm25-topk_flamegraph_alloc_space.png)

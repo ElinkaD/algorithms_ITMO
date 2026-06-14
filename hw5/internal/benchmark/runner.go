@@ -147,52 +147,6 @@ func (r Runner) BenchQueries(idx *index.MemoryIndex, specs []benchdata.QuerySpec
 	return rows, nil
 }
 
-func (r Runner) BenchMmapVsMemory(idx *index.MemoryIndex, specs []benchdata.QuerySpec, iterations int) ([]MmapVsMemory, error) {
-	if iterations <= 0 {
-		iterations = 5
-	}
-	rows := make([]MmapVsMemory, 0, len(specs))
-	reader, err := storage.Open(r.IndexPath)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	for _, spec := range specs {
-		memRow, err := r.measureQuery(idx, nil, spec, "memory", scoring.RankNone, iterations)
-		if err != nil {
-			return nil, err
-		}
-		mmapRow, err := r.measureQuery(idx, reader, spec, "mmap", scoring.RankNone, iterations)
-		if err != nil {
-			return nil, err
-		}
-		eq, err := r.resultsEqual(idx, reader, spec)
-		if err != nil {
-			return nil, err
-		}
-		ratio := 0.0
-		if memRow.AvgLatencyMS > 0 {
-			ratio = mmapRow.AvgLatencyMS / memRow.AvgLatencyMS
-		}
-		rows = append(rows, MmapVsMemory{
-			Docs:                idx.DocCount,
-			Query:               spec.Query,
-			OperatorType:        spec.OperatorType,
-			MemoryLatencyMS:     memRow.AvgLatencyMS,
-			MemoryLatencyCILow:  memRow.AvgLatencyCILow,
-			MemoryLatencyCIHigh: memRow.AvgLatencyCIHigh,
-			MmapLatencyMS:       mmapRow.AvgLatencyMS,
-			MmapLatencyCILow:    mmapRow.AvgLatencyCILow,
-			MmapLatencyCIHigh:   mmapRow.AvgLatencyCIHigh,
-			MmapToMemoryRatio:   ratio,
-			MemoryHits:          memRow.Hits,
-			MmapHits:            mmapRow.Hits,
-			ResultsEqual:        eq,
-		})
-	}
-	return rows, nil
-}
-
 func (r Runner) BenchRanking(idx *index.MemoryIndex, specs []benchdata.QuerySpec, topK int, iterations int) ([]RankingStats, error) {
 	if iterations <= 0 {
 		iterations = 5
@@ -287,14 +241,6 @@ func (r Runner) measureQuery(idx *index.MemoryIndex, reader *storage.MmapSegment
 	if avg > 0 {
 		qps = 1000 / avg
 	}
-	qpsLow := 0.0
-	qpsHigh := 0.0
-	if avgHigh > 0 {
-		qpsLow = 1000 / avgHigh
-	}
-	if avgLow > 0 {
-		qpsHigh = 1000 / avgLow
-	}
 	return QueryLatency{
 		CorpusName:         r.CorpusName,
 		Docs:               idx.DocCount,
@@ -307,14 +253,7 @@ func (r Runner) measureQuery(idx *index.MemoryIndex, reader *storage.MmapSegment
 		AvgLatencyMS:       avg,
 		AvgLatencyCILow:    avgLow,
 		AvgLatencyCIHigh:   avgHigh,
-		P50LatencyMS:       percentile(durations, 0.50),
-		P95LatencyMS:       percentile(durations, 0.95),
-		MinLatencyMS:       durations[0],
-		MaxLatencyMS:       durations[len(durations)-1],
 		QPS:                qps,
-		QPSCILow:           qpsLow,
-		QPSCIHigh:          qpsHigh,
-		AllocBytesPerQuery: (after.TotalAlloc - before.TotalAlloc) / uint64(iterations),
 		AllocsPerQuery:     (after.Mallocs - before.Mallocs) / uint64(iterations),
 	}, nil
 }
@@ -342,34 +281,6 @@ func (r Runner) executeOnce(idx *index.MemoryIndex, reader *storage.MmapSegmentR
 		_ = scoring.TopK(active, pl, node.QueryTerms(), rank, 10)
 	}
 	return len(pl.Postings), nil
-}
-
-func (r Runner) resultsEqual(idx *index.MemoryIndex, reader *storage.MmapSegmentReader, spec benchdata.QuerySpec) (bool, error) {
-	node, err := query.Parse(spec.Query)
-	if err != nil {
-		return false, err
-	}
-	memPL, err := query.Execute(idx, node)
-	if err != nil {
-		return false, err
-	}
-	mmapIdx, err := reader.Materialize(node.QueryTerms())
-	if err != nil {
-		return false, err
-	}
-	mmapPL, err := query.Execute(mmapIdx, node)
-	if err != nil {
-		return false, err
-	}
-	if len(memPL.Postings) != len(mmapPL.Postings) {
-		return false, nil
-	}
-	for i := range memPL.Postings {
-		if memPL.Postings[i].DocID != mmapPL.Postings[i].DocID {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 func (r Runner) ResultPath(name string) string {
@@ -405,19 +316,6 @@ func topTerms(idx *index.MemoryIndex, by string) string {
 	return strings.Join(parts, ";")
 }
 
-func percentile(values []float64, p float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	pos := int(float64(len(values)-1) * p)
-	if pos < 0 {
-		pos = 0
-	}
-	if pos >= len(values) {
-		pos = len(values) - 1
-	}
-	return values[pos]
-}
 
 func ms(d time.Duration) float64 {
 	return float64(d.Microseconds()) / 1000

@@ -216,22 +216,6 @@ if query:
         run_rows.sort(key=lambda r: int(r["run"].split(" seg", 1)[0]) if r["run"].split(" seg", 1)[0].isdigit() else 0)
         bar(run_rows, "run", "avg_latency_ms", "Average sharded latency by run", "ms", "sharded_latency_by_run.png")
 
-mmap = read_csv("wiki_mmap_vs_memory.csv")
-if mmap:
-    labels = [r["operator_type"] for r in mmap]
-    mem = [float(r["memory_latency_ms"]) for r in mmap]
-    mm = [float(r["mmap_latency_ms"]) for r in mmap]
-    x = list(range(len(labels)))
-    plt.figure(figsize=(12, 5))
-    plt.bar([i - 0.2 for i in x], mem, width=0.4, label="memory")
-    plt.bar([i + 0.2 for i in x], mm, width=0.4, label="mmap")
-    plt.title("Memory vs mmap latency")
-    plt.xlabel("query")
-    plt.ylabel("ms")
-    plt.xticks(x, labels, rotation=30, ha="right")
-    plt.legend()
-    save(GRAPHS / "mmap_vs_memory_latency.png")
-
 ranking = read_csv("wiki_ranking_stats.csv")
 if ranking:
     labels = [r["query"][:24] for r in ranking]

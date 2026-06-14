@@ -51,12 +51,14 @@ https://dumps.wikimedia.org/enwiki/latest/
 
 ```bash
 cd hw5
+make bench-build-wiki DOCS=50000 INDEX=./data/wiki_50k.seg ITERATIONS=5
 make build-wiki-shards DOCS=835456 SEGMENT_DOCS=50000
 make build-wiki-shards-half-prefix SEGMENT_DOCS=50000
 make wiki-report-scale-stats SEGMENT_DOCS=50000
 make bench-query-wiki-shards-one-reuse SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
 make bench-query-wiki-shards-half-reuse SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
 make bench-query-wiki-shards DOCS=835456 SHARD_LIMIT=0 SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
+make bench-ranking-wiki DOCS=50000 INDEX=./data/wiki_50k.seg TOPK=10 ITERATIONS=5
 make graphs
 ```
 
@@ -92,27 +94,27 @@ make graphs
 
 `QUERIES_PER_TYPE=50` означает, что генератор попробует собрать до `50` запросов на каждый тип оператора. Это уже сотни запросов и нормально подходит для отчета. Если нужен стресс-тест на несколько тысяч запросов, можно поднять до `300`, но такой прогон будет заметно дольше.
 
-Если нужны характеристики корпуса именно для трех срезов, есть два варианта:
-
-- `make wiki-report-scale-stats SEGMENT_DOCS=50000` — итоговый сравнительный CSV для `50000 / 417728 / 835456`;
-- `make wiki-stats DOCS=50000`, `make wiki-stats DOCS=417728`, `make wiki-stats DOCS=835456` — точный одиночный snapshot для одного размера.
-
-Второй вариант каждый раз перезаписывает `wiki_corpus_stats.csv`, поэтому для отчёта удобнее держать итоговые сравнительные значения в `wiki_scale_stats.csv`.
+Если нужны характеристики корпуса именно для трех срезов, основной путь для отчёта - это `make wiki-report-scale-stats SEGMENT_DOCS=50000`. Он пишет итоговый сравнительный CSV для `50000 / 417728 / 835456`.
 
 ## 5. Консольный поиск
 
 ```bash
-make run-cli-wiki
-make search-theme TOPK=5
 make search-women-science TOPK=10
 make search-women-rights TOPK=10
 make search-feminism TOPK=10
+make search-scientists TOPK=10
 make search-marie-curie TOPK=10
 make search-ada-lovelace TOPK=10
 
-go run ./cmd/searchdemo --mode search --index ./data/wiki.seg --query "women AND science" --topK 10 --rank bm25
-go run ./cmd/searchdemo --mode search --index ./data/wiki.seg --query "(women OR feminism) AND rights" --topK 10 --rank bm25
-go run ./cmd/searchdemo --mode search --index ./data/wiki.seg --query '"marie curie"' --topK 10 --rank bm25
+go run ./cmd/searchdemo --mode search --index ./data/wiki_50k.seg --query "women AND science" --topK 10 --rank bm25
+go run ./cmd/searchdemo --mode search --index ./data/wiki_50k.seg --query "(women OR feminism) AND rights" --topK 10 --rank bm25
+go run ./cmd/searchdemo --mode search --index ./data/wiki_50k.seg --query '"marie curie"' --topK 10 --rank bm25
+```
+
+Если нужен интерактивный режим, можно открыть REPL так:
+
+```bash
+go run ./cmd/searchdemo --mode repl --index ./data/wiki_50k.seg
 ```
 
 REPL команды:
@@ -144,28 +146,70 @@ RUN_WIKI_BENCH=1 WIKI=./data/wiki_sample.jsonl DOCS=5000 go test ./... -bench=Wi
 
 ## 7. Профилирование
 
-Профилирование удобнее снимать на одном базовом segment-е `50000` документов: так проще открыть flame graph в браузере и не ждать полный sharded-прогон.
+Профилирование удобнее снимать на одном базовом segment-е `50000` документов: так проще открыть flame graph в браузере и не ждать полный sharded-прогон. Сейчас все profiling-скрипты используют один и тот же путь через `cmd/searchdemo --mode profile-workload`.
+
+Базовые команды:
 
 ```bash
-../scripts/hw5_profile_cpu.sh
-../scripts/hw5_profile_mem.sh
+cd hw5
+make profile-cpu
+make profile-mem
+make profile-interesting
 ```
 
-Файлы:
+- `make profile-cpu` снимает только CPU profiles
+- `make profile-mem` снимает только memory profiles
+- `make profile-interesting` просто запускает оба скрипта подряд
+
+Снимаются такие сценарии:
+
+- `wiki-near-query` - только `query.Execute` для proximity-запроса на memory backend
+- `wiki-complex-query` - только `query.Execute` для сложного boolean-запроса
+- `wiki-bm25-topk` - только `TopK` после уже готового boolean filter
+- `wiki-mmap-materialize-near` - `Materialize + query.Execute` для mmap backend
+- `wiki-mmap-lookup` - чистый `LookupTerm` без ranking и boolean merge
+
+Результаты сохраняются в:
 
 ```text
-reports/hw5/profiles/cpu_and.out
-reports/hw5/profiles/cpu_or.out
-reports/hw5/profiles/cpu_near.out
-reports/hw5/profiles/cpu_bm25.out
-reports/hw5/profiles/mem_query.out
+reports/hw5/profiles/cpu/clean_*.out
+reports/hw5/profiles/cpu/clean_*_top.txt
+reports/hw5/profiles/mem/clean_*.out
+reports/hw5/profiles/mem/clean_*_top.txt
+reports/hw5/profiles/bin/searchdemo
 ```
 
-Просмотр:
+По умолчанию используется базовый `50k`-срез:
+
+```text
+WIKI=./data/wiki_sample.jsonl
+DOCS=50000
+INDEX=./data/wiki_50k.seg
+CPU_ITERATIONS=200
+MEM_ITERATIONS=50
+```
+
+Для быстрого прогона можно уменьшить число итераций:
 
 ```bash
-go tool pprof reports/hw5/profiles/cpu_and.out
-go tool pprof -http=:8080 reports/hw5/profiles/cpu_and.out
+cd hw5
+CPU_ITERATIONS=50 make profile-cpu
+MEM_ITERATIONS=10 make profile-mem
 ```
 
-Для Web UI достаточно открыть профиль на `50k`-срезе и уже оттуда сделать скриншоты нужных frame graph.
+Для Web UI:
+
+```bash
+scripts/hw5_pprof_ui.sh cpu wiki-near-query
+scripts/hw5_pprof_ui.sh mem wiki-bm25-topk
+```
+
+Или через `make`:
+
+```bash
+cd hw5
+make pprof-ui-cpu PROFILE=wiki-near-query
+make pprof-ui-mem PROFILE=wiki-bm25-topk PPROF_HTTP=:8081
+```
+
+В `PROFILE` можно передать и полное имя файла, например `clean_wiki-near-query.out`, или полный путь до конкретного `.out`.
