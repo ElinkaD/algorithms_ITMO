@@ -15,4 +15,4 @@ hw5/data/queries/*.json
 hw5/data/queries/*.txt
 hw5/data/wiki_dump/
 **/.cache
-**/hw5/data/wiki_sample.jsonl
+**/hw5/data

@@ -108,7 +108,11 @@ func CorpusStatsFromIndex(corpusName string, idx *index.MemoryIndex) CorpusStats
 }
 
 func (r Runner) PrepareQuerySuite(idx *index.MemoryIndex, docs []index.Document) ([]benchdata.QuerySpec, error) {
-	specs := benchdata.GenerateQuerySuite(idx, docs, 10)
+	return r.PrepareQuerySuiteWithPerType(idx, docs, 10)
+}
+
+func (r Runner) PrepareQuerySuiteWithPerType(idx *index.MemoryIndex, docs []index.Document, perType int) ([]benchdata.QuerySpec, error) {
+	specs := benchdata.GenerateQuerySuite(idx, docs, perType)
 	return specs, benchdata.WriteQuerySuite(benchdata.DefaultWikiQueryJSON, benchdata.DefaultWikiQueryTXT, specs)
 }
 
@@ -143,7 +147,10 @@ func (r Runner) BenchQueries(idx *index.MemoryIndex, specs []benchdata.QuerySpec
 	return rows, nil
 }
 
-func (r Runner) BenchMmapVsMemory(idx *index.MemoryIndex, specs []benchdata.QuerySpec) ([]MmapVsMemory, error) {
+func (r Runner) BenchMmapVsMemory(idx *index.MemoryIndex, specs []benchdata.QuerySpec, iterations int) ([]MmapVsMemory, error) {
+	if iterations <= 0 {
+		iterations = 5
+	}
 	rows := make([]MmapVsMemory, 0, len(specs))
 	reader, err := storage.Open(r.IndexPath)
 	if err != nil {
@@ -151,11 +158,11 @@ func (r Runner) BenchMmapVsMemory(idx *index.MemoryIndex, specs []benchdata.Quer
 	}
 	defer reader.Close()
 	for _, spec := range specs {
-		memRow, err := r.measureQuery(idx, nil, spec, "memory", scoring.RankNone, 3)
+		memRow, err := r.measureQuery(idx, nil, spec, "memory", scoring.RankNone, iterations)
 		if err != nil {
 			return nil, err
 		}
-		mmapRow, err := r.measureQuery(idx, reader, spec, "mmap", scoring.RankNone, 3)
+		mmapRow, err := r.measureQuery(idx, reader, spec, "mmap", scoring.RankNone, iterations)
 		if err != nil {
 			return nil, err
 		}
@@ -168,21 +175,28 @@ func (r Runner) BenchMmapVsMemory(idx *index.MemoryIndex, specs []benchdata.Quer
 			ratio = mmapRow.AvgLatencyMS / memRow.AvgLatencyMS
 		}
 		rows = append(rows, MmapVsMemory{
-			Docs:              idx.DocCount,
-			Query:             spec.Query,
-			OperatorType:      spec.OperatorType,
-			MemoryLatencyMS:   memRow.AvgLatencyMS,
-			MmapLatencyMS:     mmapRow.AvgLatencyMS,
-			MmapToMemoryRatio: ratio,
-			MemoryHits:        memRow.Hits,
-			MmapHits:          mmapRow.Hits,
-			ResultsEqual:      eq,
+			Docs:                idx.DocCount,
+			Query:               spec.Query,
+			OperatorType:        spec.OperatorType,
+			MemoryLatencyMS:     memRow.AvgLatencyMS,
+			MemoryLatencyCILow:  memRow.AvgLatencyCILow,
+			MemoryLatencyCIHigh: memRow.AvgLatencyCIHigh,
+			MmapLatencyMS:       mmapRow.AvgLatencyMS,
+			MmapLatencyCILow:    mmapRow.AvgLatencyCILow,
+			MmapLatencyCIHigh:   mmapRow.AvgLatencyCIHigh,
+			MmapToMemoryRatio:   ratio,
+			MemoryHits:          memRow.Hits,
+			MmapHits:            mmapRow.Hits,
+			ResultsEqual:        eq,
 		})
 	}
 	return rows, nil
 }
 
-func (r Runner) BenchRanking(idx *index.MemoryIndex, specs []benchdata.QuerySpec, topK int) ([]RankingStats, error) {
+func (r Runner) BenchRanking(idx *index.MemoryIndex, specs []benchdata.QuerySpec, topK int, iterations int) ([]RankingStats, error) {
+	if iterations <= 0 {
+		iterations = 5
+	}
 	var rows []RankingStats
 	for _, spec := range specs {
 		if spec.OperatorType != "TERM" && spec.OperatorType != "AND" && spec.OperatorType != "BM25_TOPK" && spec.OperatorType != "TFIDF_TOPK" {
@@ -192,19 +206,42 @@ func (r Runner) BenchRanking(idx *index.MemoryIndex, specs []benchdata.QuerySpec
 		if err != nil {
 			return nil, err
 		}
-		start := time.Now()
-		pl, err := query.Execute(idx, node)
-		if err != nil {
+		if _, err := query.Execute(idx, node); err != nil {
 			return nil, err
 		}
-		booleanMS := ms(time.Since(start))
-		start = time.Now()
+		var pl index.PostingList
+		var booleanSamples, tfidfSamples, bm25Samples []float64
+		for i := 0; i < iterations; i++ {
+			start := time.Now()
+			pl, err = query.Execute(idx, node)
+			if err != nil {
+				return nil, err
+			}
+			booleanSamples = append(booleanSamples, ms(time.Since(start)))
+
+			start = time.Now()
+			_ = scoring.TopK(idx, pl, node.QueryTerms(), scoring.RankTFIDF, topK)
+			tfidfSamples = append(tfidfSamples, ms(time.Since(start)))
+
+			start = time.Now()
+			_ = scoring.TopK(idx, pl, node.QueryTerms(), scoring.RankBM25, topK)
+			bm25Samples = append(bm25Samples, ms(time.Since(start)))
+		}
 		tfidf := scoring.TopK(idx, pl, node.QueryTerms(), scoring.RankTFIDF, topK)
-		tfidfMS := ms(time.Since(start))
-		start = time.Now()
 		bm25 := scoring.TopK(idx, pl, node.QueryTerms(), scoring.RankBM25, topK)
-		bm25MS := ms(time.Since(start))
+		booleanMS := mean(booleanSamples)
+		tfidfMS := mean(tfidfSamples)
+		bm25MS := mean(bm25Samples)
+		booleanLow, booleanHigh := ci95(booleanSamples)
+		tfidfLow, tfidfHigh := ci95(tfidfSamples)
+		bm25Low, bm25High := ci95(bm25Samples)
 		row := RankingStats{Query: spec.Query, Hits: len(pl.Postings), TopK: topK, BooleanOnlyLatencyMS: booleanMS, TFIDFLatencyMS: tfidfMS, BM25LatencyMS: bm25MS}
+		row.BooleanCILow = booleanLow
+		row.BooleanCIHigh = booleanHigh
+		row.TFIDFCILow = tfidfLow
+		row.TFIDFCIHigh = tfidfHigh
+		row.BM25CILow = bm25Low
+		row.BM25CIHigh = bm25High
 		if booleanMS > 0 {
 			row.TFIDFOverheadPercent = 100 * tfidfMS / booleanMS
 			row.BM25OverheadPercent = 100 * bm25MS / booleanMS
@@ -229,6 +266,9 @@ func (r Runner) measureQuery(idx *index.MemoryIndex, reader *storage.MmapSegment
 	durations := make([]float64, 0, iterations)
 	hits := 0
 	var before, after runtime.MemStats
+	if _, err := r.executeOnce(idx, reader, spec.Query, backend, rank); err != nil {
+		return QueryLatency{}, err
+	}
 	runtime.ReadMemStats(&before)
 	for i := 0; i < iterations; i++ {
 		start := time.Now()
@@ -241,10 +281,19 @@ func (r Runner) measureQuery(idx *index.MemoryIndex, reader *storage.MmapSegment
 	}
 	runtime.ReadMemStats(&after)
 	sort.Float64s(durations)
-	avg := average(durations)
+	avg := mean(durations)
+	avgLow, avgHigh := ci95(durations)
 	qps := 0.0
 	if avg > 0 {
 		qps = 1000 / avg
+	}
+	qpsLow := 0.0
+	qpsHigh := 0.0
+	if avgHigh > 0 {
+		qpsLow = 1000 / avgHigh
+	}
+	if avgLow > 0 {
+		qpsHigh = 1000 / avgLow
 	}
 	return QueryLatency{
 		CorpusName:         r.CorpusName,
@@ -256,11 +305,15 @@ func (r Runner) measureQuery(idx *index.MemoryIndex, reader *storage.MmapSegment
 		Iterations:         iterations,
 		Hits:               hits,
 		AvgLatencyMS:       avg,
+		AvgLatencyCILow:    avgLow,
+		AvgLatencyCIHigh:   avgHigh,
 		P50LatencyMS:       percentile(durations, 0.50),
 		P95LatencyMS:       percentile(durations, 0.95),
 		MinLatencyMS:       durations[0],
 		MaxLatencyMS:       durations[len(durations)-1],
 		QPS:                qps,
+		QPSCILow:           qpsLow,
+		QPSCIHigh:          qpsHigh,
 		AllocBytesPerQuery: (after.TotalAlloc - before.TotalAlloc) / uint64(iterations),
 		AllocsPerQuery:     (after.Mallocs - before.Mallocs) / uint64(iterations),
 	}, nil
@@ -350,17 +403,6 @@ func topTerms(idx *index.MemoryIndex, by string) string {
 		parts[i] = fmt.Sprintf("%s:%d", it.term, it.v)
 	}
 	return strings.Join(parts, ";")
-}
-
-func average(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
 }
 
 func percentile(values []float64, p float64) float64 {

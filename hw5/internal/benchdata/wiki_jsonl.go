@@ -36,3 +36,52 @@ func ReadWikiJSONL(path string, limit int) ([]index.Document, error) {
 	}
 	return docs, sc.Err()
 }
+
+func ReadWikiJSONLChunks(path string, limit int, chunkSize int, fn func(chunkIndex int, docs []index.Document) error) error {
+	if chunkSize <= 0 {
+		chunkSize = 50000
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	buf := make([]byte, 1024*1024)
+	sc.Buffer(buf, 64*1024*1024)
+	chunk := make([]index.Document, 0, chunkSize)
+	chunkIndex := 0
+	total := 0
+	flush := func() error {
+		if len(chunk) == 0 {
+			return nil
+		}
+		docs := append([]index.Document(nil), chunk...)
+		chunk = chunk[:0]
+		if err := fn(chunkIndex, docs); err != nil {
+			return err
+		}
+		chunkIndex++
+		return nil
+	}
+	for sc.Scan() {
+		var rec WikiRecord
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			return err
+		}
+		chunk = append(chunk, index.Document{ID: rec.ID, Title: rec.Title, Text: rec.Text})
+		total++
+		if len(chunk) >= chunkSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		if limit > 0 && total >= limit {
+			break
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return flush()
+}

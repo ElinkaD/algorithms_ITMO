@@ -26,7 +26,11 @@ func GenerateQuerySuite(idx *index.MemoryIndex, docs []index.Document, perType i
 	if perType <= 0 {
 		perType = 10
 	}
-	topTerms := topTermsByDF(idx, 80)
+	topLimit := perType * 3
+	if topLimit < 80 {
+		topLimit = 80
+	}
+	topTerms := topTermsByDF(idx, topLimit)
 	var suite []QuerySpec
 	add := func(q string, typ string, notes string) {
 		if countType(suite, typ) >= perType {
@@ -56,6 +60,9 @@ func GenerateQuerySuite(idx *index.MemoryIndex, docs []index.Document, perType i
 		add(term, "TERM", "high-df term from corpus")
 		add(term, "BM25_TOPK", "same boolean candidates, BM25 ranking")
 		add(term, "TFIDF_TOPK", "same boolean candidates, TF-IDF ranking")
+		if hasEnoughTypes(suite, perType, "TERM", "BM25_TOPK", "TFIDF_TOPK") {
+			break
+		}
 	}
 	for i := 0; i < len(topTerms); i++ {
 		for j := i + 1; j < len(topTerms); j++ {
@@ -68,6 +75,12 @@ func GenerateQuerySuite(idx *index.MemoryIndex, docs []index.Document, perType i
 				add(fmt.Sprintf("(%s OR %s) AND %s", a, b, c), "COMPLEX", "mixed OR/AND")
 				add(fmt.Sprintf("(%s OR %s) AND NOT %s", a, b, c), "COMPLEX", "mixed OR/NOT")
 			}
+			if hasEnoughTypes(suite, perType, "AND", "OR", "NOT", "COMPLEX") {
+				break
+			}
+		}
+		if hasEnoughTypes(suite, perType, "AND", "OR", "NOT", "COMPLEX") {
+			break
 		}
 	}
 	for _, pair := range adjacentPairs(docs, perType*4) {
@@ -76,6 +89,9 @@ func GenerateQuerySuite(idx *index.MemoryIndex, docs []index.Document, perType i
 		add(`"`+pair[0]+" "+pair[1]+`"`, "PHRASE", "phrase sugar for ADJ chain")
 		if countType(suite, "COMPLEX") < perType && len(topTerms) > 0 {
 			add(pair[0]+" NEAR/3 "+pair[1]+" AND NOT "+topTerms[0], "COMPLEX", "near plus negative clause")
+		}
+		if hasEnoughTypes(suite, perType, "ADJ", "NEAR/3", "PHRASE") {
+			break
 		}
 	}
 	sort.SliceStable(suite, func(i, j int) bool {
@@ -270,6 +286,15 @@ func countType(specs []QuerySpec, typ string) int {
 		}
 	}
 	return n
+}
+
+func hasEnoughTypes(specs []QuerySpec, perType int, types ...string) bool {
+	for _, typ := range types {
+		if countType(specs, typ) < perType {
+			return false
+		}
+	}
+	return true
 }
 
 func isStopTerm(term string) bool {

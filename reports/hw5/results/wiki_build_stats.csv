@@ -1,2 +1,2 @@
-corpus_name,docs,total_build_time_ms,segment_write_time_ms,total_time_ms,docs_per_sec,tokens_per_sec,unique_terms,total_postings,segment_file_size_bytes
-wiki,5000,11510.4420,5858.7980,17369.2410,287.8652,997163.3574,313566,5102583,74883697
+corpus_name,docs,total_build_time_ms,total_build_time_ci_low_ms,total_build_time_ci_high_ms,segment_write_time_ms,segment_write_ci_low_ms,segment_write_ci_high_ms,total_time_ms,total_time_ci_low_ms,total_time_ci_high_ms,docs_per_sec,tokens_per_sec,unique_terms,total_postings,segment_file_size_bytes
+wiki,50000,61967.0764,61269.1526,62665.0002,23840.3076,23350.2683,24330.3469,85807.3850,84758.8243,86855.9457,573.0205,1532390.3265,1153261,41549886,562779680

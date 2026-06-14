@@ -10,11 +10,11 @@ make bench-smoke
 make compression-stats-synthetic DOCS=5000
 ```
 
-Synthetic corpus нужен для smoke-проверки и для стабильных пар `data pipeline`, `new york`, `machine learning`, `distributed systems`.
+Synthetic corpus нужен только для smoke-проверки и для стабильных пар `data pipeline`, `new york`, `machine learning`, `distributed systems`. Основной отчёт считаем на Wikipedia.
 
 ## 2. Текущий Wikipedia dataset
 
-Сейчас локально используется не полный 6GB subset, а частично скачанный Wikipedia JSONL примерно на `1.4-1.5 GB`.
+Сейчас локально используется Wikipedia JSONL размером примерно `6.1 GB`.
 
 Файл:
 
@@ -28,26 +28,18 @@ hw5/data/wiki_sample.jsonl
 {"id":1,"title":"Article title","text":"Article text"}
 ```
 
-Это нормальный рабочий вариант для текущего отчёта: все CSV и графики пересчитаны на первых `5000` статьях из этого файла. Когда сеть позволит, можно догрузить до 5-8GB той же командой.
+В файле `835456` строк, одна строка соответствует одной статье Wikipedia. Поэтому срезы задаются параметром `DOCS`:
+
+- `DOCS=50000` — один segment, малый контрольный прогон;
+- `DOCS=417728` — отдельный half-prefix в `9` segment-ах;
+- `DOCS=835456` — весь текущий датасет.
+
+Срез выбирается как первые `DOCS` строк из `wiki_sample.jsonl`. Это не случайная выборка, зато такой benchmark легко воспроизвести: один и тот же `DOCS` всегда дает один и тот же корпус.
 
 ## 3. Как догружать Wikipedia
 
-```bash
-cd ..
+
 DOWNLOAD=1 TARGET_GB=6 scripts/hw5_prepare_wiki_sample.sh
-```
-
-Если Python на macOS ругается на сертификаты:
-
-```bash
-open "/Applications/Python 3.10/Install Certificates.command"
-```
-
-Или для одного скачивания публичного Wikimedia dump:
-
-```bash
-WIKI_INSECURE_SSL=1 DOWNLOAD=1 TARGET_GB=6 scripts/hw5_prepare_wiki_sample.sh
-```
 
 Источник:
 
@@ -59,36 +51,53 @@ https://dumps.wikimedia.org/enwiki/latest/
 
 ```bash
 cd hw5
-make wiki-stats DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make build-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make prepare-wiki-queries DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make compression-stats-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make bench-query-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl ITERATIONS=3
-make bench-mmap-vs-memory DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make bench-ranking-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
+make build-wiki-shards DOCS=835456 SEGMENT_DOCS=50000
+make build-wiki-shards-half-prefix SEGMENT_DOCS=50000
+make wiki-report-scale-stats SEGMENT_DOCS=50000
+make bench-query-wiki-shards-one-reuse SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
+make bench-query-wiki-shards-half-reuse SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
+make bench-query-wiki-shards DOCS=835456 SHARD_LIMIT=0 SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
 make graphs
 ```
 
-Одна команда:
+`make wiki-report-scale-stats` пишет `reports/hw5/results/wiki_scale_stats.csv` с тремя точками: `1 seg / 50000 docs`, `9 seg / 417728 docs`, `17 seg / 835456 docs`. Именно этот CSV нужен, чтобы в `Raw vs compressed` появились не только значения для одного segment-а, но и половина и полный датасет.
+
+Для финальных графиков масштабирования нужны три CSV:
+
+```text
+reports/hw5/results/wiki_sharded_query_latency_docs50000_shards1.csv
+reports/hw5/results/wiki_sharded_query_latency_docs417728_shards9.csv
+reports/hw5/results/wiki_sharded_query_latency_docs835456_shards17.csv
+```
+
+Первый файл уже снят. Если нужно доснять половину и полный датасет, запускай:
 
 ```bash
-make bench-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl ITERATIONS=3
+make build-wiki-shards-half-prefix SEGMENT_DOCS=50000
+make wiki-report-scale-stats SEGMENT_DOCS=50000
+make bench-query-wiki-shards-half-reuse SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
+make bench-query-wiki-shards DOCS=835456 SHARD_LIMIT=0 SEGMENT_DOCS=50000 QUERIES_PER_TYPE=50 QUERY_SAMPLE_DOCS=10000 ITERATIONS=5
 make graphs
 ```
 
-Для более крупного прогона после догрузки:
+После каждого sharded-прогона код сохраняет общий `wiki_sharded_query_latency.csv` и отдельный snapshot с `docs` и числом shard-ов в имени. Именно snapshot-файлы нужны для графика сравнения `1 / 9 / 17` segment-ов.
 
-```bash
-make bench-wiki DOCS=10000 WIKI=./data/wiki_sample.jsonl ITERATIONS=3
-make bench-wiki DOCS=25000 WIKI=./data/wiki_sample.jsonl ITERATIONS=3
-```
+В query benchmark перед пятью измерениями делается один дополнительный прогревочный запуск. Он нужен, чтобы первый доступ к mmap/декодированию не портил среднее.
 
-Удобные aliases:
+Эти команды используют разные shard-индексы:
 
-```bash
-make report-wiki-5k
-make report-wiki-10k
-```
+- `data/wiki_shards/manifest.json` для полного прогона на `835456` документах;
+- `data/wiki_shards/prefix-417728/manifest.json` для точной половины датасета;
+- один segment `50000` документов для малого контрольного прогона.
+
+`QUERIES_PER_TYPE=50` означает, что генератор попробует собрать до `50` запросов на каждый тип оператора. Это уже сотни запросов и нормально подходит для отчета. Если нужен стресс-тест на несколько тысяч запросов, можно поднять до `300`, но такой прогон будет заметно дольше.
+
+Если нужны характеристики корпуса именно для трех срезов, есть два варианта:
+
+- `make wiki-report-scale-stats SEGMENT_DOCS=50000` — итоговый сравнительный CSV для `50000 / 417728 / 835456`;
+- `make wiki-stats DOCS=50000`, `make wiki-stats DOCS=417728`, `make wiki-stats DOCS=835456` — точный одиночный snapshot для одного размера.
+
+Второй вариант каждый раз перезаписывает `wiki_corpus_stats.csv`, поэтому для отчёта удобнее держать итоговые сравнительные значения в `wiki_scale_stats.csv`.
 
 ## 5. Консольный поиск
 
@@ -135,6 +144,8 @@ RUN_WIKI_BENCH=1 WIKI=./data/wiki_sample.jsonl DOCS=5000 go test ./... -bench=Wi
 
 ## 7. Профилирование
 
+Профилирование удобнее снимать на одном базовом segment-е `50000` документов: так проще открыть flame graph в браузере и не ждать полный sharded-прогон.
+
 ```bash
 ../scripts/hw5_profile_cpu.sh
 ../scripts/hw5_profile_mem.sh
@@ -157,17 +168,4 @@ go tool pprof reports/hw5/profiles/cpu_and.out
 go tool pprof -http=:8080 reports/hw5/profiles/cpu_and.out
 ```
 
-## 8. Где лежат результаты
-
-```text
-reports/hw5/results/
-graphs/hw5/
-```
-
-Сырые большие данные и сегменты не коммитятся:
-
-```text
-hw5/data/wiki_sample.jsonl
-hw5/data/wiki_dump/
-hw5/data/*.seg
-```
+Для Web UI достаточно открыть профиль на `50k`-срезе и уже оттуда сделать скриншоты нужных frame graph.

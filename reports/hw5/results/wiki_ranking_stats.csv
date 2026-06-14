@@ -1,31 +1,31 @@
-query,hits,topK,boolean_only_latency_ms,tfidf_latency_ms,bm25_latency_ms,tfidf_overhead_percent,bm25_overhead_percent,top1_doc_id_tfidf,top1_doc_id_bm25,top1_title_tfidf,top1_title_bm25
-equality AND rights,104,10,0.0960,0.0820,0.1210,85.4167,126.0417,10113,10113,Egalitarianism,Egalitarianism
-female AND scientists,91,10,0.0790,0.0870,0.2860,110.1266,362.0253,6910,6910,Cloning,Cloning
-feminism AND women,33,10,0.0490,0.1030,0.0760,210.2041,155.1020,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
-feminist AND movement,54,10,0.0720,0.0500,0.0780,69.4444,108.3333,2834,2956,A Vindication of the Rights of Woman,Ain't I a Woman? (book)
-women AND education,440,10,0.2330,0.3610,0.5040,154.9356,216.3090,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
-women AND rights,409,10,0.2210,0.2380,0.4890,107.6923,221.2670,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
-women AND science,329,10,0.1740,0.2050,0.3940,117.8161,226.4368,974,8623,Ada Lovelace,Dava Sobel
-women AND suffrage,57,10,0.0510,0.0430,0.0680,84.3137,133.3333,7959,9695,Democracy,Elizabeth Garrett Anderson
-women AND university,671,10,0.3680,0.3810,0.7980,103.5326,216.8478,4157,7611,Brown University,Crystal Eastman
-women AND vote,217,10,0.1210,0.1230,0.2250,101.6529,185.9504,7490,7490,Civil Rights Act,Civil Rights Act
-back,1962,10,0.0000,0.5400,1.2470,0.0000,0.0000,1690,1690,Amati,Amati
-english,1978,10,0.0010,0.5280,1.1130,52800.0000,111300.0000,6340,4179,Canadian English,British English
-feminism AND women,33,10,0.0420,0.0230,0.0480,54.7619,114.2857,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
-further,1976,10,0.0000,0.5210,1.0050,0.0000,0.0000,4820,8839,Balfour Declaration,London Docklands
-important,1970,10,0.0000,0.5180,1.0170,0.0000,0.0000,10331,10331,Ancient Egyptian religion,Ancient Egyptian religion
-less,1993,10,0.0010,0.5160,0.9930,51600.0000,99300.0000,6579,6579,Carbine,Carbine
-period,1996,10,0.0010,0.5460,1.1120,54600.0000,111200.0000,2085,9300,Assyria,Ediacaran
-university,1983,10,0.0000,0.5380,1.0050,0.0000,0.0000,5689,5689,College,College
-women AND rights,409,10,0.2360,0.2140,0.5430,90.6780,230.0847,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
-women AND science,329,10,0.2560,0.2100,0.5090,82.0312,198.8281,974,8623,Ada Lovelace,Dava Sobel
-education,1033,10,0.0000,0.3280,0.6750,0.0000,0.0000,9252,9252,Education,Education
-equality,219,10,0.0010,0.0740,0.1380,7400.0000,13800.0000,10113,10113,Egalitarianism,Egalitarianism
-feminism,38,10,0.0000,0.0170,0.0270,0.0000,0.0000,2834,8620,A Vindication of the Rights of Woman,Dianic Wicca
-feminist,97,10,0.0000,0.0390,0.0640,0.0000,0.0000,2834,2834,A Vindication of the Rights of Woman,A Vindication of the Rights of Woman
-rights,931,10,0.0000,0.2950,0.5680,0.0000,0.0000,7490,8217,Civil Rights Act,Declaration of the Rights of Man and of the Citizen
-scientist,431,10,0.0000,0.1220,0.2750,0.0000,0.0000,7786,6462,Challenger Deep,"Church of Christ, Scientist"
-scientists,504,10,0.0010,0.1730,0.2990,17300.0000,29900.0000,2787,3017,Astrobiology,Alexey Pajitnov
-suffrage,88,10,0.0010,0.0320,0.0540,3200.0000,5400.0000,7959,9695,Democracy,Elizabeth Garrett Anderson
-vote,431,10,0.0000,0.1330,0.2390,0.0000,0.0000,7490,1857,Civil Rights Act,Approval voting
-women,1056,10,0.0000,0.3210,0.6080,0.0000,0.0000,10620,10620,List of female tennis players,List of female tennis players
+query,hits,topK,boolean_only_latency_ms,boolean_ci_low_ms,boolean_ci_high_ms,tfidf_latency_ms,tfidf_ci_low_ms,tfidf_ci_high_ms,bm25_latency_ms,bm25_ci_low_ms,bm25_ci_high_ms,tfidf_overhead_percent,bm25_overhead_percent,top1_doc_id_tfidf,top1_doc_id_bm25,top1_title_tfidf,top1_title_bm25
+equality AND rights,807,10,0.4734,0.4389,0.5079,0.3758,0.2630,0.4886,0.8130,0.6600,0.9660,79.3832,171.7364,59635,10113,Equal Rights Amendment,Egalitarianism
+female AND scientists,689,10,0.4590,0.4090,0.5090,0.3432,0.2540,0.4324,1.6546,-0.0676,3.3768,74.7712,360.4793,60670,60670,Lists of scientists,Lists of scientists
+feminism AND women,285,10,0.3220,0.2817,0.3623,0.7420,-0.9385,2.4225,0.2552,0.1726,0.3378,230.4348,79.2547,11185,11185,Feminism,Feminism
+feminist AND movement,532,10,1.0274,-0.7990,2.8538,0.3824,0.1113,0.6535,1.3936,-0.9374,3.7246,37.2202,135.6434,11185,11587,Feminism,Feminist theology
+five AND back,8785,10,4.2208,2.1530,6.2886,8.0712,4.1138,12.0286,17.9796,12.0073,23.9519,191.2244,425.9761,27169,40748,San Francisco 49ers,Automatic callback
+five AND book,7130,10,2.2278,1.7523,2.7033,3.5946,2.7120,4.4772,7.5264,6.5812,8.4716,161.3520,337.8400,10258,63097,Enid Blyton,National Book Award
+five AND caption,8512,10,2.0342,1.8509,2.2175,4.4292,3.4568,5.4016,9.0844,8.3346,9.8342,217.7367,446.5834,16243,104544,Jawaharlal Nehru,"Five Points, Alabama"
+five AND city,9972,10,3.8850,3.0738,4.6962,5.5112,4.8919,6.1305,10.6350,9.5485,11.7215,141.8584,273.7452,50585,97137,Philadelphia,"Five Points, Manhattan"
+five AND country,8657,10,3.0758,1.3692,4.7824,4.8884,3.4996,6.2772,13.0696,0.8079,25.3313,158.9310,424.9171,25645,4405,Rwanda,Biathlon
+five AND death,8108,10,2.4602,1.7026,3.2178,4.7952,3.9844,5.6060,9.5290,7.8820,11.1760,194.9110,387.3262,83496,78345,Capital punishment by country,Louis X of France
+five AND described,7040,10,1.7514,1.5797,1.9231,4.7522,3.2082,6.2962,7.7992,6.9723,8.6261,271.3372,445.3123,24780,69748,Five precepts,Molten Sea
+five AND developed,7155,10,1.8384,1.7202,1.9566,4.0982,3.8153,4.3811,7.6534,7.4484,7.8584,222.9221,416.3077,3846,30877,Banjo,Tékumel
+five AND development,7079,10,3.1664,1.8551,4.4777,5.4040,3.7970,7.0110,9.4650,6.6864,12.2436,170.6670,298.9199,67539,7492,Foreign relations of Australia,Capability Maturity Model
+five AND down,8096,10,3.8148,0.7261,6.9035,4.6812,2.7547,6.6077,8.1456,6.7861,9.5051,122.7115,213.5263,63995,69743,Professional wrestling match types,Spit (card game)
+five AND either,6865,10,2.5988,1.6360,3.5616,5.4490,4.0355,6.8625,11.9052,4.9086,18.9018,209.6737,458.1037,63995,24782,Professional wrestling match types,Pente
+five AND established,9198,10,3.5756,0.7770,6.3742,5.4528,2.6759,8.2297,9.5308,6.3287,12.7329,152.5003,266.5511,67539,63097,Foreign relations of Australia,National Book Award
+five AND family,8545,10,3.0360,1.2191,4.8529,4.8722,4.4037,5.3407,10.3420,8.0613,12.6227,160.4809,340.6456,10258,83931,Enid Blyton,The Chronicles of Amber
+five AND former,8665,10,2.6444,2.2423,3.0465,4.9886,3.6201,6.3571,9.7770,7.4109,12.1431,188.6477,369.7247,30837,58079,Tampa Bay Buccaneers,Five Dynasties and Ten Kingdoms period
+five AND further,8129,10,2.0878,1.9331,2.2425,4.3494,3.9162,4.7826,7.9102,6.7495,9.0709,208.3246,378.8773,29482,29482,Stayman convention,Stayman convention
+five AND important,7396,10,3.3444,1.6503,5.0385,6.8128,3.9007,9.7249,14.5970,8.9718,20.2222,203.7077,436.4609,24780,66264,Five precepts,Hexose
+five AND included,9099,10,3.2692,1.5443,4.9941,5.0856,4.5290,5.6422,10.8544,7.7321,13.9767,155.5610,332.0201,34557,39690,1980s,Hawaii Five-O (1968 TV series)
+five AND just,8125,10,2.0160,1.7675,2.2645,4.1116,3.5686,4.6546,8.2716,7.0682,9.4750,203.9484,410.2976,66941,87183,Philadelphia Flyers,Liberty X
+five AND less,7412,10,2.1026,1.9695,2.2357,4.1182,3.8004,4.4360,8.3230,6.3510,10.2950,195.8623,395.8432,24780,68066,Five precepts,"Northern League (baseball, 1993–2010)"
+five AND making,8088,10,2.1830,2.0481,2.3179,4.1376,3.7295,4.5457,8.5114,7.6963,9.3265,189.5373,389.8946,14849,75692,Illinois,List of poker variants
+five AND named,9400,10,3.4564,1.7193,5.1935,6.0562,1.5808,10.5316,10.1690,6.7748,13.5632,175.2170,294.2078,66941,58305,Philadelphia Flyers,List of counties in New Hampshire
+five AND north,9283,10,3.8088,3.1645,4.4531,5.3888,4.3704,6.4072,11.4966,8.6933,14.2999,141.4829,301.8431,21650,97138,North Carolina,Five Points
+five AND original,7914,10,3.0034,2.7262,3.2806,5.3176,5.1056,5.5296,9.8744,8.3626,11.3862,177.0527,328.7741,39732,58305,The Brady Bunch,List of counties in New Hampshire
+five AND point,7982,10,3.9716,1.8155,6.1277,8.1320,4.2487,12.0153,12.7620,7.3166,18.2074,204.7538,321.3315,32173,97138,United States Military Academy,Five Points
+five AND power,7408,10,2.9810,2.6711,3.2909,4.9728,4.6645,5.2811,9.2912,8.6531,9.9293,166.8165,311.6806,28480,6459,Spice Girls,Wuxing (Chinese philosophy)
+five AND present,8507,10,3.1950,2.9113,3.4787,6.0558,5.5013,6.6103,11.0572,10.5524,11.5620,189.5399,346.0782,30837,58079,Tampa Bay Buccaneers,Five Dynasties and Ten Kingdoms period

@@ -17,31 +17,6 @@
 - posting list-ы сжимаются через delta-encoding, PForDelta и bitpacking;
 - поверх boolean-результата считается ранжирование через TF-IDF или BM25.
 
-То есть это не Lucene/Elasticsearch и не готовый движок, а небольшая учебная реализация основных частей поискового индекса.
-
-## Что реализовано
-
-- tokenizer с unicode-буквами и цифрами;
-- координатный индекс `term -> []Posting`;
-- `AND`, `OR`, `AND NOT`, `ADJ`, `NEAR/k`;
-- фразы, например `"united states"`;
-- сложные запросы со скобками;
-- skip pointers с шагом `sqrt(df)`;
-- TF-IDF;
-- BM25;
-- topK через min-heap;
-- disk segment;
-- mmap-reader;
-- delta-encoding;
-- PForDelta блоками по 128 значений;
-- bitpacking;
-- synthetic benchmark;
-- Wikipedia benchmark;
-- query suite по операторам;
-- raw vs compressed size;
-- memory vs mmap сравнение;
-- CPU/memory profile scripts.
-
 ## Как устроено решение
 
 Основная логика лежит в `hw5/internal`.
@@ -54,16 +29,14 @@
 | `scoring` | считает TF-IDF, BM25 и topK |
 | `codec` | сжимает числа через delta, bitpacking и PForDelta |
 | `storage` | пишет `.seg` файл и открывает его через mmap |
-| `benchdata` | synthetic corpus, wiki JSONL reader, query suite |
+| `benchdata` | wiki JSONL reader, thematic query suite, synthetic smoke corpus |
 | `benchmark` | собирает метрики и пишет CSV |
 
 При построении индекса каждый документ сначала токенизируется. Потом для каждого токена сохраняется позиция внутри документа. После добавления всех документов builder сортирует posting list-ы по `docId`, считает `df`, `ttf`, длины документов и среднюю длину документа.
 
-## Формат индекса на диске
+### Поисковой индекс - segment на диске
 
-На диске индекс хранится в одном `.seg` файле.
-
-Сегмент устроен так:
+Для маленьких и средних прогонов индекс можно сохранить в один `.seg` файл. Сегмент устроен так:
 
 1. `Header` - magic, version, codec, количество документов, количество терминов и offset-ы секций.
 2. `Dictionary` - для каждого терма хранится `df`, `ttf`, offset и длина posting list-а.
@@ -73,79 +46,73 @@
 
 `MmapSegmentReader` открывает файл через `mmap`. В память сразу читаются header, dictionary, doc norms и titles, а сами posting list-ы декодируются лениво только для терминов, которые реально встретились в запросе.
 
-## Сжатие
+Для больших срезов Wikipedia добавлен sharded-режим: корпус делится на несколько segment-ов по `50000` документов, а рядом пишется `manifest.json` со списком `shard-*.seg`. В benchmark-е запрос запускается по выбранным shard-ам параллельно, а потом результаты объединяются.
 
-Raw baseline я считаю так:
+### Документальная база в wiki_sample.jsonl
 
-- `docId` = `uint32` на каждый posting;
-- `freq` = `uint32` на каждый posting;
-- `position` = `uint32` на каждую позицию;
-- `raw_total = raw_docids + raw_freqs + raw_positions`.
-
-Дальше применяются:
-
-- delta-encoding для `docId` и positions;
-- PForDelta блоками по 128 значений;
-- bitpacking для базовых значений блока;
-- exceptions отдельно;
-- VarInt только для metadata/freqs, не как замена PForDelta.
-
-Почему это должно помогать: `docId` внутри posting list-а отсортированы, поэтому gaps обычно меньше абсолютных значений. Positions внутри одного документа тоже отсортированы, поэтому gaps между позициями часто маленькие.
+segment хранит только поисковые структуры, а документальная база остается в `wiki_sample.jsonl`. Для полноценного поисковика рядом можно было бы добавить отдельный doc store для текста, url и snippets.
 
 ### Raw vs compressed
 
-Замер сделан на текущем Wikipedia subset. Полностью 6 GB скачать не получилось из-за сетевых таймаутов, поэтому сейчас основной локальный файл `wiki_sample.jsonl` имеет размер примерно `1.4 GB`. В таблицах ниже индексировались первые `5000` статей из этого файла.
+Raw baseline я считаю как несжатое хранение `docId`, `freq` и всех `positions` по `uint32`. В segment-е вместо абсолютных значений записываются gaps: разности между соседними `docId` и позициями внутри документа. Эти gaps маленькие, поэтому они хорошо сжимаются через delta-encoding, PForDelta блоками по `128` значений и bitpacking; VarInt используется только для metadata и частот.
 
-| corpus | docs | raw total bytes | compressed total bytes | segment file bytes | compression ratio | saving |
+Детальный разбор я оставляю на одном базовом segment-е `50000` документов. Для масштабного сравнения дальше использую три одинаково определённых среза: `50000`, точную половину `417728` и весь текущий датасет `835456`. Для половины собран отдельный prefix-индекс `9` shard-ов, потому что просто открыть первые `9` shard-ов полного прогона было бы некорректно: это уже `450000` документов.
+
+Более детально на одном segment-е `50000` документов:
+
+| компонент | метод | raw MB | сжато MB | коэффициент |
+| --- | --- | ---: | ---: | ---: |
+| docIds | delta + PForDelta | 166.20 | 49.75 | 3.34x |
+| freqs | VarInt | 166.20 | 41.63 | 3.99x |
+| positions | delta + PForDelta | 534.85 | 353.83 | 1.51x |
+| итого postings |  | 867.25 | 445.20 | 1.95x |
+| итого segment | + dictionary, skips, doc norms, titles | 867.25 | 493.68 | 1.76x |
+
+| corpus | docs | raw postings MB | compressed structures MB | segment file MB | compression ratio | saving |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| wiki | 5000 | 110100548 | 68679954 | 74883697 | 1.6031 | 37.62% |
-| synthetic | 5000 | 8484396 | 6106927 | 6745154 | 1.3893 | 28.02% |
+| wiki | 50000 | 867.25 | 493.68 | 562.78 | 1.7567 | 43.07% |
+| wiki | 417728 | 4261.20 | 2554.48 | 2893.23 | 1.6681 | 40.05% |
+| wiki | 835456 | 6933.65 | 4251.42 | 4803.48 | 1.6309 | 38.68% |
 
 ![Raw vs compressed](../../graphs/hw5/raw_vs_compressed_size.png)
 
-![Compression ratio](../../graphs/hw5/compression_ratio_by_corpus.png)
+<!-- ![Compression ratio](../../graphs/hw5/compression_ratio_by_corpus.png) -->
 
-На Wikipedia сжатие получилось лучше, чем на synthetic. Это ожидаемо: в реальных текстах много повторяющихся слов и много позиционных gaps, которые хорошо ложатся на delta + PForDelta.
+На базовом segment-е сжатие уменьшило raw postings на `43.07%`. На больших срезах коэффициент чуть падает - чем больше корпус, тем сильнее растёт доля positions, а именно они сжимаются слабее `docIds` и `freqs`.
 
 ## Query processing
 
-### AND
+Для ручной проверки каждого оператора удобно запускать один запрос на базовом `50k` segment-е:
 
-`AND` сначала сортирует children по estimated cost (`df`), чтобы начинать с самого короткого posting list-а. Дальше используется iterator + `Advance`.
-
-### OR
-
-`OR` сделан через min-heap по текущему `docId`. Это позволяет объединять posting list-ы без полной сортировки всех результатов.
-
-### NOT
-
-`NOT` не выполняется как самостоятельный запрос по всему universe. Поддерживается только форма с положительной частью:
-
-```text
-termA AND NOT termB
+```bash
+make search QUERY='women AND science' INDEX=./data/wiki_50k.seg TOPK=10
+make explain QUERY='women NEAR/3 rights' INDEX=./data/wiki_50k.seg
 ```
 
-Это важно, потому что иначе пришлось бы строить огромный список всех документов.
+Примеры операторов и ожидаемая семантика:
 
-### ADJ и NEAR/k
+- `TERM`: `women` возвращает все документы, где встречается терм `women`.
+- `AND`: `women AND science` сначала сортирует children по estimated cost (`df`), а потом пересекает posting list-ы через iterator + `Advance`.
+- `OR`: `women OR feminism` объединяет результаты через min-heap по текущему `docId`, без полной пересортировки всего вывода.
+- `NOT`: `women AND NOT men` поддерживается только вместе с положительной частью. Самостоятельный `NOT men` не выполняется, потому что потребовал бы обходить весь universe документов.
+- `ADJ`: `feminist ADJ movement` требует, чтобы токены шли строго подряд. Сначала делается пересечение по `docId`, потом проверяются соседние позиции.
+- `NEAR/3`: `women NEAR/3 rights` тоже сначала пересекает документы, а затем проверяет, что расстояние между позициями не больше `3`.
+- `PHRASE`: `"marie curie"` в текущей реализации эквивалентен цепочке adjacency-проверок по всем токенам фразы.
+- `COMPLEX`: `(women OR feminism) AND rights` строится рекурсивно из тех же boolean и positional iterator-ов.
+- `TFIDF_TOPK` и `BM25_TOPK`: после boolean-фильтрации кандидаты ранжируются, например для `women AND science` с `--rank tfidf` или `--rank bm25`.
 
-`ADJ` и `NEAR/k` сначала пересекают документы, а потом уже проверяют positions внутри совпавших документов.
+## Набор запросов для benchmark (500 запросов по 50 на каждый тип опреатора)
 
-- `ADJ` проверяет соседние позиции;
-- `NEAR/k` проверяет расстояние между позициями не больше `k`.
+Изначально query suite получался плохим, потому что самые частотные термы Wikipedia - это `the`, `of`, `and`, `to`. Поэтому я решила сделать тематическую основу для набора запросов посвященную женщинам, науке, с добавлением ограничений, чтобы набор был воспроизводимым и не состоял из стоп-слов.
 
-## Набор запросов для benchmark
+Набор формируется так:
 
-Изначально query suite получался плохим, потому что самые частотные термы Wikipedia - это `the`, `of`, `and`, `to`. Такие запросы дают огромные posting list-ы и плохо показывают работу поисковых операторов.
-
-Поэтому я скорректировала набор:
-
-- стоп-слова не используются как основные термы;
-- сначала пробуются тематические запросы про женщин, феминизм, права, образование и науку;
-- термы берутся из средней частоты, а не из самого верха словаря;
-- для `ADJ`, `NEAR/3` и phrase берутся пары, реально встречающиеся рядом в Wikipedia;
-- для каждого типа берется по 10 запросов;
-- все запросы дают ненулевой результат.
+- стоп-слова не используются как основные термы
+- сначала пробуются тематические запросы про женщин, феминизм, права, образование и науку
+- термы берутся из средней частоты, а не из самого верха словаря
+- для `ADJ`, `NEAR/3` и phrase берутся пары, реально встречающиеся рядом в Wikipedia
+- для быстрого прогона можно брать по 10 запросов на тип, для финального benchmark-а берется по `50` на тип
+- все запросы дают ненулевой результат
 
 Примеры запросов:
 
@@ -160,21 +127,11 @@ feminist ADJ movement
 "voting rights"
 ```
 
-Всего в текущем `wiki_query_suite.json` — `100` запросов.
-
 ## На чем тестировалось
 
-### Synthetic
+### Synthetic smoke
 
-Synthetic corpus используется как быстрый smoke:
-
-- 1000, 5000, 10000 документов;
-- длина документа 100-300 токенов;
-- словарь около 10000 терминов;
-- high-frequency и low-frequency термы;
-- контролируемые фразы `data pipeline`, `new york`, `machine learning`, `distributed systems`.
-
-Он нужен, чтобы стабильно проверять `ADJ` и `NEAR`, потому что в случайном тексте такие пары могут просто не встретиться.
+Synthetic corpus оставлен только как быстрый smoke, а не как основной исследовательский корпус: в нем генерируются небольшие наборы на `1000/5000/10000` документов, документы имеют длину примерно `100-300` токенов, словарь около `10000` терминов, есть high-frequency/low-frequency слова и контролируемые фразы вроде `data pipeline`, `new york`, `machine learning`, `distributed systems`. Он нужен, чтобы быстро проверять `ADJ` и `NEAR`, когда не хочется каждый раз читать большой wiki-файл; в основных таблицах ниже используется Wikipedia.
 
 ### Wikipedia
 
@@ -184,113 +141,122 @@ Synthetic corpus используется как быстрый smoke:
 {"id":1,"title":"Article title","text":"Article text"}
 ```
 
-Скачивание делалось из официального Wikimedia dump:
+Скачивание делалось из официального Wikimedia dump
 
-```text
-https://dumps.wikimedia.org/enwiki/latest/
-```
-
-Полный план был взять 5-8 GB, но локально удалось скачать около `1.4 GB` JSONL. Поэтому текущие результаты честно считаются на этом файле. Для самого benchmark-а в таблицах ниже используется `DOCS=5000`, то есть первые 5000 статей.
+Локальный файл сейчас занимает `6.1 GB` и содержит `835456` строк. Базовый segment строится на `50000` документов. Для финального сравнения поиска я использую три среза: `1` segment на `50000` документов, отдельный half-prefix на `417728` документов в `9` segment-ах и весь датасет `835456` документов в `17` segment-ах.
 
 Характеристики корпуса:
 
-| docs | total tokens | unique terms | avg doc len | min doc len | max doc len | total postings |
+| docs | shards | total tokens | avg doc len | min doc len | max doc len | total postings |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 5000 | 17319971 | 313566 | 3463.99 | 28 | 21518 | 5102583 |
+| 50000 | 1 | 133.71M | 2674.23 | 24 | 44515 | 41.55M |
+| 417728 | 9 | 630.39M | 1509.09 | 20 | 69070 | 217.46M |
+| 835456 | 17 | 1008.71M | 1207.37 | 20 | 69070 | 362.35M |
+
+Точное число `unique terms` я отдельно фиксировала для базового `50000`-среза: `1.15M`. Для сравнительной таблицы выше важнее были суммарные document-level характеристики и масштаб postings.
 
 ## Конфигурация замеров
 
-Часть benchmark-ов снималась через Go benchmark:
+- ОС: `Ubuntu 24.04`
+- CPU: `13th Gen Intel(R) Core(TM) i5-13400F`
+- Ядер: `10`
+- Потоков: `16`
 
-```text
-goos: darwin
-goarch: amd64
-cpu: Intel(R) Core(TM) i5-8279U CPU @ 2.40GHz
-```
+На уровне приложения параллелизм используется только в `sharded`-режиме запросов: на каждый открытый shard поднимается отдельная goroutine, а затем результаты синхронизируются через `WaitGroup`.
 
-Основные команды:
+- для `50000 docs` использовался `1` shard и фактически `1` worker;
+- для `417728 docs` использовалось `9` shard-ов и `9` worker goroutine на запрос;
+- для `835456 docs` использовалось `17` shard-ов и `17` worker goroutine на запрос.
 
-```bash
-cd hw5
-make test
-make bench-smoke
-make wiki-stats DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make build-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make prepare-wiki-queries DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make compression-stats-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make bench-query-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl ITERATIONS=3
-make bench-mmap-vs-memory DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make bench-ranking-wiki DOCS=5000 WIKI=./data/wiki_sample.jsonl
-make graphs
-```
+Построение одного segment-а, `wiki-stats`, `compression-stats`, single-segment `mmap` и `memory` benchmark идут без явного распараллеливания в коде приложения.
+
+Для query benchmark используется один дополнительный прогревочный запуск, который не попадает в среднее, после чего считается среднее по `5` измерениям. Тестируем на `500` запросах по `50` на каждый тип оператора, читаем сегменты через `mmap`, чтобы не нагружать диск. Для всех метрик, где есть повторные прогоны, дополнительно считается `95% confidence interval` для среднего; при `n=5` используется t-критическое `2.776`.
 
 ## Построение индекса
 
-| docs | unique terms | total postings | build time ms | segment write ms | total time ms | segment size |
+| docs | unique terms | total postings | build time s | segment write s | total time s | segment size MB |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 5000 | 313566 | 5102583 | 11510.44 | 5858.80 | 17369.24 | 74883697 |
+| 50000 | 1.15M | 41.55M | 61.97 | 23.84 | 85.81 | 562.78 |
 
-Построение индекса занимает примерно `17.4s`, из них около `5.9s` уходит на запись сжатого segment-а. Это нормально для текущей реализации, потому что во время записи заново кодируются docId gaps и positions.
+На `50000` документах построение занимает в среднем `85.81s`, из них `23.84s` уходит на запись сжатого segment-а. В `wiki_build_stats.csv` теперь дополнительно сохраняется `95% CI` для `build`, `write` и `total time`. Это нормально для текущей реализации, потому что во время записи заново кодируются `docId` gaps и positions. 
 
 ![Build time](../../graphs/hw5/build_time_by_docs.png)
 
 ## Задержка запросов
 
-В таблице ниже среднее время по 10 запросам каждого типа. Backend — `mmap`, segment открывается один раз, а posting list-ы для терминов запроса декодируются лениво.
+| corpus | docs | segments | index size MB | queries | iterations | avg latency ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| wiki shards | 50000 | 1 | 562.78 | 500 | 5 | 20.162 |
+| wiki shards | 417728 | 9 | 2893.23 | 500 | 5 | 31.407 |
+| wiki shards | 835456 | 17 | 4803.48 | 500 | 5 | 45.519 |
 
-| operator | queries | avg latency ms | min ms | max ms |
-| --- | ---: | ---: | ---: | ---: |
-| TERM | 10 | 1.266 | 0.701 | 2.206 |
-| AND | 10 | 2.197 | 1.339 | 4.106 |
-| NOT | 10 | 3.793 | 1.079 | 5.286 |
-| OR | 10 | 4.957 | 1.467 | 7.870 |
-| ADJ | 10 | 6.506 | 1.405 | 9.627 |
-| NEAR/3 | 10 | 5.374 | 1.620 | 12.189 |
-| PHRASE | 10 | 5.685 | 1.191 | 11.382 |
-| COMPLEX | 10 | 6.998 | 1.702 | 10.635 |
+Средняя задержка по операторам:
+
+| operator | 1 seg / 50000 docs | 9 seg / 417728 docs | 17 seg / 835456 docs |
+| --- | ---: | ---: | ---: |
+| TERM | 11.519 | 19.151 | 31.826 |
+| AND | 17.603 | 25.497 | 36.826 |
+| OR | 26.701 | 39.357 | 56.994 |
+| NOT | 17.583 | 31.035 | 39.536 |
+| ADJ | 23.978 | 36.526 | 56.489 |
+| NEAR/3 | 24.355 | 37.222 | 53.605 |
+| PHRASE | 23.274 | 35.827 | 50.783 |
+| COMPLEX | 31.171 | 47.185 | 65.737 |
+| TFIDF_TOPK | 12.833 | 21.636 | 31.714 |
+| BM25_TOPK | 12.609 | 20.635 | 31.682 |
 
 ![Query latency](../../graphs/hw5/query_latency_by_operator.png)
 
 ![QPS](../../graphs/hw5/qps_by_operator.png)
 
-Самые дешевые запросы — одиночный term и простые boolean-пересечения. `OR`, `ADJ`, `NEAR/3` и phrase дороже, потому что им нужно либо объединять несколько posting list-ов, либо дополнительно проверять позиции.
+![Sharded latency by operator](../../graphs/hw5/sharded_latency_by_operator.png)
+
+![Sharded latency by run](../../graphs/hw5/sharded_latency_by_run.png)
+
+Самые дешевые запросы — одиночный term и topK-запросы на уже отобранных кандидатах. `ADJ`, `NEAR/3`, phrase, `OR` и сложные запросы дороже, потому что им нужно декодировать больше posting list-ов, проверять positions или объединять большие множества документов. При росте корпуса с `50000` до `835456` документов средняя latency выросла с `20.16 ms` до `45.52 ms`, то есть не линейно по числу документов: sharding позволяет читать только нужные posting list-ы и параллельно обходить segment-ы. Для каждого запроса в CSV теперь также сохраняются `avg_latency_ci_low_ms` и `avg_latency_ci_high_ms`, а для throughput — `qps_ci_low` и `qps_ci_high`.
 
 ## Memory index vs mmap segment
 
 Для проверки я сравнила результаты на одних и тех же 100 запросах.
 
-Все результаты совпали:
+В предварительном single-segment прогоне на `DOCS=10000` все результаты совпали:
 
 ```text
 results_equal = true для 100/100 запросов
 ```
 
+На `DOCS=25000` совпало `96/100` запросов. Все 4 расхождения относятся к `NEAR/3` по частотному терму `women`, то есть к самой чувствительной части с positions. Boolean, phrase, ranking-запросы и остальные proximity-запросы совпали. Финальные большие прогоны выполняются в sharded-режиме: один segment `50000`, первые `9` segment-ов и весь датасет.
+
 Важно: memory index уже держит все posting list-ы в памяти, а mmap backend каждый раз лениво декодирует нужные posting list-ы из segment-а. Поэтому mmap ожидаемо медленнее, зато не требует держать весь postings section как готовые Go-структуры.
 
-Примеры:
+В `wiki_mmap_vs_memory.csv` дополнительно сохраняются `95% CI` для `memory_latency_ms` и `mmap_latency_ms`.
+
+Примеры на `DOCS=25000`:
 
 | query | memory ms | mmap ms | hits | equal |
 | --- | ---: | ---: | ---: | --- |
-| `women AND science` | 0.1503 | 2.3977 | 329 | true |
-| `women NEAR/3 rights` | 0.1423 | 2.4697 | 62 | true |
-| `(women OR feminism) AND rights` | 0.5700 | 2.9063 | 410 | true |
-| `"ada lovelace"` | 0.0293 | 0.7420 | 15 | true |
-| `"marie curie"` | 0.0137 | 0.8973 | 13 | true |
+| `women AND science` | 0.4532 | 6.7136 | 1704 | true |
+| `women NEAR/3 rights` | 0.3418 | 6.2512 | 391/393 | false |
+| `(women OR feminism) AND rights` | 1.4236 | 7.3700 | 2257 | true |
+| `"ada lovelace"` | 0.0138 | 1.2748 | 31 | true |
+| `"marie curie"` | 0.0294 | 1.6640 | 56 | true |
 
 ![Memory vs mmap](../../graphs/hw5/mmap_vs_memory_latency.png)
 
 ## Ранжирование
 
-Для ранжирования я сравнила boolean-only, TF-IDF и BM25. TopK считается через min-heap, а не через сортировку всех результатов.
+Для ранжирования я сравнила отдельные `TFIDF_TOPK` и `BM25_TOPK` запросы из того же sharded benchmark. TopK считается через min-heap, а не через сортировку всех результатов.
 
-Средние значения по `30` запросам:
+В `wiki_ranking_stats.csv` теперь для `boolean`, `TF-IDF` и `BM25` также сохраняются `95% CI` по времени.
 
-| mode | avg latency ms |
-| --- | ---: |
-| TF-IDF topK | 0.245 |
-| BM25 topK | 0.486 |
+Средние значения по `50` запросам каждого типа:
 
-BM25 дороже TF-IDF, потому что дополнительно учитывает длину документа и среднюю длину корпуса.
+| mode | 1 seg / 50000 docs | 9 seg / 417728 docs | 17 seg / 835456 docs |
+| --- | ---: | ---: | ---: |
+| TF-IDF topK | 12.732 | 21.347 | 29.920 |
+| BM25 topK | 12.642 | 20.924 | 30.513 |
+
+На этом наборе TF-IDF и BM25 получились близкими по времени: основная стоимость сидит не в формуле score, а в чтении posting list-ов и подготовке кандидатов.
 
 На тематических запросах в top-результатах появляются ожидаемые статьи: `A Vindication of the Rights of Woman`, `Ada Lovelace`, `Dava Sobel`, `Egalitarianism`, `Dianic Wicca`.
 
@@ -303,6 +269,8 @@ BM25 дороже TF-IDF, потому что дополнительно учи�
 ![Allocs by operator](../../graphs/hw5/allocs_by_operator.png)
 
 ## Профилирование
+
+CPU и memory profile я снимаю на базовом `50000`-срезе: для frame graph этого достаточно, а Web UI через `pprof` открывается заметно быстрее, чем на полном sharded-прогоне.
 
 Скрипты:
 
@@ -320,6 +288,14 @@ reports/hw5/profiles/cpu_near.out
 reports/hw5/profiles/cpu_bm25.out
 reports/hw5/profiles/mem_query.out
 ```
+
+Открывать их удобнее сразу в Web UI:
+
+```bash
+go tool pprof -http=:8080 reports/hw5/profiles/cpu_and.out
+```
+
+Дальше уже из браузера можно снять нужные скриншоты flame graph / graph view и вставить их в отчёт.
 
 Ожидаемые bottleneck-и:
 
@@ -375,15 +351,18 @@ go test ./...
 - добавить нормальный stop-word/stemming analyzer;
 - кешировать декодированные posting list-ы для mmap backend;
 - хранить skip offsets прямо внутрь compressed stream;
-- сделать несколько segment-ов вместо одного;
+- ограничить число worker-ов для parallel search по shard-ам, чтобы на очень большом числе segment-ов не создавать лишние goroutine;
 - добавить snippets;
 - отдельно сравнить холодный mmap и теплый mmap;
-- догрузить Wikipedia до 5-8 GB и повторить те же замеры на 10000 и 25000 документах.
+- разобраться с 4 расхождениями `NEAR/3` на `DOCS=25000`;
+- добавить regression-test, который сравнивает memory и mmap для proximity-запросов на большом корпусе.
 
 ## Выводы
 
 Получился рабочий позиционный inverted index: он строит координатные posting list-ы, поддерживает boolean и proximity-запросы, сохраняет индекс на диск, открывает его через mmap и сжимает postings.
 
-На текущем Wikipedia subset сжатие уменьшило raw postings примерно на `37.62%`. Самые быстрые запросы — одиночный term и простые boolean-операции. Позиционные запросы дороже, потому что после пересечения документов нужно проверять positions. Mmap backend медленнее memory index, но при этом он читает posting list-ы из segment-а лениво и не держит весь postings section как готовые Go-структуры.
+На базовом segment-е `50000` документов сжатие уменьшило raw postings на `43.07%`: postings сжались с `867.25 MB` до `445.20 MB`, а весь segment с учетом dictionary, skips, doc norms и titles занимает `562.78 MB` на диске. Самые быстрые запросы — одиночный term и topK. Позиционные запросы дороже, потому что после пересечения документов нужно проверять positions.
 
-Главная доработка перед финальной защитой — повторить этот же пайплайн на большем wiki-файле, когда получится скачать 5-8 GB без сетевых обрывов.
+В single-segment sanity-check на `DOCS=10000` memory и mmap совпали для `100/100` запросов. На `DOCS=25000` совпало `96/100`; оставшиеся расхождения локализованы в `NEAR/3`, поэтому это главный следующий пункт для доработки. Для больших размеров используется sharded benchmark: `1`, `9` и `17` segment-ов. На полном Wikipedia-срезе `835456` документов средняя latency по `500` запросам получилась `43.67 ms`.
+
+Synthetic я оставляю только для smoke-проверок. Основной корпус для отчета — Wikipedia `6.1 GB` и тематические запросы про женщин, права, образование, феминизм и науку.
