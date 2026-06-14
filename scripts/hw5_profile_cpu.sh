@@ -2,10 +2,48 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-mkdir -p "$ROOT/reports/hw5/profiles"
-cd "$ROOT/hw5"
-go test ./... -bench=BenchmarkAndQuery -cpuprofile ../reports/hw5/profiles/cpu_and.out
-go test ./... -bench=BenchmarkOrQuery -cpuprofile ../reports/hw5/profiles/cpu_or.out
-go test ./... -bench=BenchmarkNearQuery -cpuprofile ../reports/hw5/profiles/cpu_near.out
-go test ./... -bench=BenchmarkBM25TopK -cpuprofile ../reports/hw5/profiles/cpu_bm25.out
-go tool pprof -top ../reports/hw5/profiles/cpu_and.out > ../reports/hw5/profiles/cpu_and_top.txt
+HW5_DIR="$ROOT/hw5"
+PROFILE_DIR="$ROOT/reports/hw5/profiles/cpu"
+
+mkdir -p "$PROFILE_DIR"
+rm -f "$PROFILE_DIR"/*.out "$PROFILE_DIR"/*_top.txt
+
+cd "$HW5_DIR"
+
+BENCHMARKS=(
+  BenchmarkAndQuery
+  BenchmarkOrQuery
+  BenchmarkNotQuery
+  BenchmarkAdjQuery
+  BenchmarkNearQuery
+  BenchmarkBM25TopK
+  BenchmarkWikiAndQuery
+  BenchmarkWikiOrQuery
+  BenchmarkWikiNotQuery
+  BenchmarkWikiAdjQuery
+  BenchmarkWikiNearQuery
+  BenchmarkWikiPhraseQuery
+  BenchmarkWikiComplexQuery
+  BenchmarkWikiBM25TopK
+  BenchmarkWikiTFIDFTopK
+  BenchmarkWikiMmapLookup
+  BenchmarkWikiMemoryVsMmapAnd
+)
+
+for bench in "${BENCHMARKS[@]}"; do
+  out_name="$(echo "$bench" | sed 's/^Benchmark//' | tr '[:upper:]' '[:lower:]')"
+
+  echo "[CPU] $bench"
+
+  go test . \
+    -run '^$' \
+    -count=1 \
+    -bench "^${bench}$" \
+    -benchmem \
+    -cpuprofile "$PROFILE_DIR/${out_name}.out"
+
+  go tool pprof -top "$PROFILE_DIR/${out_name}.out" \
+    > "$PROFILE_DIR/${out_name}_top.txt"
+done
+
+echo "[OK] CPU profiles saved to $PROFILE_DIR"

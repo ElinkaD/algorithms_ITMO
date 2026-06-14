@@ -162,7 +162,7 @@ Synthetic corpus оставлен только как быстрый smoke, а �
 - Ядер: `10`
 - Потоков: `16`
 
-На уровне приложения параллелизм используется только в `sharded`-режиме запросов: на каждый открытый shard поднимается отдельная goroutine, а затем результаты синхронизируются через `WaitGroup`.
+На каждый открытый shard поднимается отдельная goroutine, а затем результаты синхронизируются через `WaitGroup`.
 
 - для `50000 docs` использовался `1` shard и фактически `1` worker;
 - для `417728 docs` использовалось `9` shard-ов и `9` worker goroutine на запрос;
@@ -170,68 +170,110 @@ Synthetic corpus оставлен только как быстрый smoke, а �
 
 Построение одного segment-а, `wiki-stats`, `compression-stats`, single-segment `mmap` и `memory` benchmark идут без явного распараллеливания в коде приложения.
 
-Для query benchmark используется один дополнительный прогревочный запуск, который не попадает в среднее, после чего считается среднее по `5` измерениям. Тестируем на `500` запросах по `50` на каждый тип оператора, читаем сегменты через `mmap`, чтобы не нагружать диск. Для всех метрик, где есть повторные прогоны, дополнительно считается `95% confidence interval` для среднего; при `n=5` используется t-критическое `2.776`.
+Для query benchmark используется один дополнительный прогревочный запуск, который не попадает в среднее, после чего считается среднее по `5` измерениям. Тестируем на `500` запросах по `50` на каждый тип оператора, читаем сегменты через `mmap`, чтобы не нагружать диск. 
+
+Для всех метрик, где есть повторные прогоны, дополнительно считается `95% confidence interval` для среднего; при `n=5` используется t-критическое `2.776`.
 
 ## Построение индекса
 
-| docs | unique terms | total postings | build time s | segment write s | total time s | segment size MB |
+| docs | unique terms | total postings | build time s, mean ± 95% CI | segment write s, mean ± 95% CI | total time s, mean ± 95% CI | segment size MB |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 50000 | 1.15M | 41.55M | 61.97 | 23.84 | 85.81 | 562.78 |
+| 50000 | 1.15M | 41.55M | 61.97 ± 0.70 | 23.84 ± 0.49 | 85.81 ± 1.05 | 562.78 |
 
-На `50000` документах построение занимает в среднем `85.81s`, из них `23.84s` уходит на запись сжатого segment-а. В `wiki_build_stats.csv` теперь дополнительно сохраняется `95% CI` для `build`, `write` и `total time`. Это нормально для текущей реализации, потому что во время записи заново кодируются `docId` gaps и positions. 
+
 
 ![Build time](../../graphs/hw5/build_time_by_docs.png)
 
 ## Задержка запросов
 
-| corpus | docs | segments | index size MB | queries | iterations | avg latency ms |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| wiki shards | 50000 | 1 | 562.78 | 500 | 5 | 20.162 |
-| wiki shards | 417728 | 9 | 2893.23 | 500 | 5 | 31.407 |
-| wiki shards | 835456 | 17 | 4803.48 | 500 | 5 | 45.519 |
 
-Средняя задержка по операторам:
+| Docs | Shards | Rank mode | Queries | Iterations | Avg latency, ms, mean ± 95% CI | QPS, mean ± 95% CI |
+| ---: | ---: | --- | ---: | ---: | ---: | ---: |
+| 50 000 | 1 | BM25 | 500 | 5 | 20.162 ± 1.780 | 63.158 ± 5.142 |
+| 417 728 | 9 | BM25 | 500 | 5 | 31.407 ± 9.915 | 39.028 ± 19.727 |
+| 835 456 | 17  | BM25 | 500 | 5 | 45.519 ± 14.950 | 26.415 ± 10.338 |
 
-| operator | 1 seg / 50000 docs | 9 seg / 417728 docs | 17 seg / 835456 docs |
+![Sharded latency by run](../../graphs/hw5/sharded_latency_by_run.png)
+
+При росте корпуса с `50000` до `835456` документов средняя latency выросла с `20.16 ms` до `45.52 ms`, то есть не линейно по числу документов: sharding позволяет читать только нужные posting list-ы и параллельно обходить segment-ы.
+
+### Средняя задержка по операторам:
+
+| operator | 1 seg / 50 000 docs, ms | 9 seg / 417 728 docs, ms | 17 seg / 835 456 docs, ms |
 | --- | ---: | ---: | ---: |
-| TERM | 11.519 | 19.151 | 31.826 |
-| AND | 17.603 | 25.497 | 36.826 |
-| OR | 26.701 | 39.357 | 56.994 |
-| NOT | 17.583 | 31.035 | 39.536 |
-| ADJ | 23.978 | 36.526 | 56.489 |
-| NEAR/3 | 24.355 | 37.222 | 53.605 |
-| PHRASE | 23.274 | 35.827 | 50.783 |
-| COMPLEX | 31.171 | 47.185 | 65.737 |
-| TFIDF_TOPK | 12.833 | 21.636 | 31.714 |
-| BM25_TOPK | 12.609 | 20.635 | 31.682 |
+| TERM | 11.519 ± 1.146 | 19.151 ± 5.221 | 31.826 ± 9.095 |
+| AND | 17.603 ± 1.603 | 25.497 ± 7.298 | 36.826 ± 10.996 |
+| OR | 26.701 ± 2.450 | 39.357 ± 11.856 | 56.994 ± 19.057 |
+| NOT | 17.583 ± 1.612 | 31.035 ± 10.486 | 39.536 ± 11.596 |
+| ADJ | 23.978 ± 1.542 | 36.526 ± 10.959 | 56.489 ± 20.964 |
+| NEAR/3 | 24.355 ± 1.791 | 37.222 ± 11.357 | 53.605 ± 17.909 |
+| PHRASE | 23.274 ± 1.952 | 35.827 ± 11.348 | 50.783 ± 16.062 |
+| COMPLEX | 31.171 ± 3.204 | 47.185 ± 17.830 | 65.737 ± 25.303 |
+| TFIDF_TOPK | 12.833 ± 1.502 | 21.636 ± 7.065 | 31.714 ± 8.999 |
+| BM25_TOPK | 12.609 ± 1.002 | 20.635 ± 5.729 | 31.682 ± 9.524 |
+
+![Sharded latency by operator](../../graphs/hw5/sharded_latency_by_operator.png)
+
+### Время выполнения запросов по типам операторов на полном корпусе, 835 456 документов / 17 сегментов
+
+| Operator type | Queries | Avg latency, ms, mean ± 95% CI | QPS, mean ± 95% CI |
+| --- | ---: | ---: | ---: |
+| TERM | 50 | 31.826 ± 9.095 | 35.348 ± 12.375 |
+| BM25_TOPK | 50 | 31.682 ± 9.524 | 33.522 ± 11.515 |
+| TFIDF_TOPK | 50 | 31.714 ± 8.999 | 34.210 ± 10.672 |
+| AND | 50 | 36.826 ± 10.996 | 30.253 ± 9.279 |
+| NOT | 50 | 39.536 ± 11.596 | 27.054 ± 7.715 |
+| PHRASE | 50 | 50.783 ± 16.062 | 24.278 ± 7.317 |
+| NEAR/3 | 50 | 53.605 ± 17.909 | 21.617 ± 22.834 |
+| ADJ | 50 | 56.489 ± 20.964 | 21.826 ± 7.294 |
+| OR | 50 | 56.994 ± 19.057 | 19.437 ± 7.372 |
+| COMPLEX | 50 | 65.737 ± 25.303 | 16.603 ± 7.010 |
 
 ![Query latency](../../graphs/hw5/query_latency_by_operator.png)
 
 ![QPS](../../graphs/hw5/qps_by_operator.png)
 
-![Sharded latency by operator](../../graphs/hw5/sharded_latency_by_operator.png)
+Самые дешевые запросы — одиночный term и topK-запросы на уже отобранных кандидатах. `ADJ`, `NEAR/3`, phrase, `OR` и сложные запросы дороже, потому что им нужно декодировать больше posting list-ов, проверять positions или объединять большие множества документов.
 
-![Sharded latency by run](../../graphs/hw5/sharded_latency_by_run.png)
+## Ранжирование
 
-Самые дешевые запросы — одиночный term и topK-запросы на уже отобранных кандидатах. `ADJ`, `NEAR/3`, phrase, `OR` и сложные запросы дороже, потому что им нужно декодировать больше posting list-ов, проверять positions или объединять большие множества документов. При росте корпуса с `50000` до `835456` документов средняя latency выросла с `20.16 ms` до `45.52 ms`, то есть не линейно по числу документов: sharding позволяет читать только нужные posting list-ы и параллельно обходить segment-ы. Для каждого запроса в CSV теперь также сохраняются `avg_latency_ci_low_ms` и `avg_latency_ci_high_ms`, а для throughput — `qps_ci_low` и `qps_ci_high`.
+Для ранжирования я сравнила отдельные `TFIDF_TOPK` и `BM25_TOPK` запросы из того же sharded benchmark. TopK считается через min-heap
+
+Средние значения по ranking-запросам:
+
+| mode | 1 seg / 50 000 docs, ms | 9 seg / 417 728 docs, ms | 17 seg / 835 456 docs, ms |
+| --- | ---: | ---: | ---: |
+| TF-IDF topK | 12.833 ± 1.502 | 21.636 ± 7.065 | 31.714 ± 8.999 |
+| BM25 topK | 12.609 ± 1.002 | 20.635 ± 5.729 | 31.682 ± 9.524 |
+
+На тематических запросах в top-результатах появляются ожидаемые статьи: `A Vindication of the Rights of Woman`, `Ada Lovelace`, `Dava Sobel`, `Egalitarianism`, `Dianic Wicca`.
+
+![Ranking latency](../../graphs/hw5/ranking_latency.png)
+
+По графику видно:
+
+- Boolean почти всегда самый быстрый, потому что он не считает полноценный score релевантности для top-K. Он просто выполняет логическую операцию над множествами документов. TF-IDF и BM25 медленнее boolean, потому что им нужно не только найти документы, но и посчитать вес/score для кандидатов.
+BM25 часто немного медленнее TF-IDF, потому что формула сложнее (term frequency, document length и нормализацию по средней длине документа)
+- На некоторых запросах есть пики. Это значит, что запрос затронул более частотные термы или дал больше кандидатов.
+
+## Аллокации при выполнении запросов
+
+![Allocs by operator](../../graphs/hw5/allocs_by_operator.png)
+
+По графику видно, что позиционные операции и сложные запросы создают больше временных структур, потому что им нужно декодировать positions и проверять расстояния между позициями.
 
 ## Memory index vs mmap segment
 
 Для проверки я сравнила результаты на одних и тех же 100 запросах.
 
-В предварительном single-segment прогоне на `DOCS=10000` все результаты совпали:
+В предварительном single-segment прогоне на 10к все результаты совпали.
 
-```text
-results_equal = true для 100/100 запросов
-```
+На 25к совпало `96/100` запросов. Все 4 расхождения относятся к `NEAR/3` по частотному терму `women`, то есть к самой чувствительной части с positions. Boolean, phrase, ranking-запросы и остальные proximity-запросы совпали. 
 
-На `DOCS=25000` совпало `96/100` запросов. Все 4 расхождения относятся к `NEAR/3` по частотному терму `women`, то есть к самой чувствительной части с positions. Boolean, phrase, ranking-запросы и остальные proximity-запросы совпали. Финальные большие прогоны выполняются в sharded-режиме: один segment `50000`, первые `9` segment-ов и весь датасет.
+| Docs | Queries | Memory latency, ms, mean ± 95% CI | mmap latency, ms, mean ± 95% CI | Results equal |
+| ---: | ---: | ---: | ---: | ---: |
+| 25 000 | 500 | 0.895 ± 0.057 | 8.584 ± 0.573 | 488 / 500 |
 
-Важно: memory index уже держит все posting list-ы в памяти, а mmap backend каждый раз лениво декодирует нужные posting list-ы из segment-а. Поэтому mmap ожидаемо медленнее, зато не требует держать весь postings section как готовые Go-структуры.
-
-В `wiki_mmap_vs_memory.csv` дополнительно сохраняются `95% CI` для `memory_latency_ms` и `mmap_latency_ms`.
-
-Примеры на `DOCS=25000`:
 
 | query | memory ms | mmap ms | hits | equal |
 | --- | ---: | ---: | ---: | --- |
@@ -243,68 +285,95 @@ results_equal = true для 100/100 запросов
 
 ![Memory vs mmap](../../graphs/hw5/mmap_vs_memory_latency.png)
 
-## Ранжирование
+mmap почти всегда медленнее memory index, потому что memory index уже держит posting lists как готовые структуры, а mmap backend каждый раз достает нужные данные из segment-файла и декодирует их. Поэтому синие столбцы почти везде низкие, а оранжевые выше и иногда дают резкие пики.
 
-Для ранжирования я сравнила отдельные `TFIDF_TOPK` и `BM25_TOPK` запросы из того же sharded benchmark. TopK считается через min-heap, а не через сортировку всех результатов.
+## Профилирование CPU и аллокаций
 
-В `wiki_ranking_stats.csv` теперь для `boolean`, `TF-IDF` и `BM25` также сохраняются `95% CI` по времени.
+Для анализа узких мест дополнительно были сняты CPU- и memory-профили с помощью стандартного инструмента Go `pprof`. Профили строились для нескольких типов запросов: `AND`, `OR`, `NEAR/3` и `BM25_TOPK`. Эти запросы выбраны как представители разных сценариев выполнения: пересечение posting list-ов, объединение результатов, позиционный поиск и ранжирование документов.
 
-Средние значения по `50` запросам каждого типа:
+### Список снятых профилей
 
-| mode | 1 seg / 50000 docs | 9 seg / 417728 docs | 17 seg / 835456 docs |
-| --- | ---: | ---: | ---: |
-| TF-IDF topK | 12.732 | 21.347 | 29.920 |
-| BM25 topK | 12.642 | 20.924 | 30.513 |
+Профилирование запускалось для benchmark-ов, уже реализованных в корневом пакете `hw5`. Для каждого benchmark-а сохранялись два профиля: CPU profile и memory profile. CPU-профили лежат в `reports/hw5/profiles/cpu/`, memory-профили — в `reports/hw5/profiles/mem/`.
 
-На этом наборе TF-IDF и BM25 получились близкими по времени: основная стоимость сидит не в формуле score, а в чтении posting list-ов и подготовке кандидатов.
+| benchmark | CPU profile | memory profile | что анализируется |
+| --- | --- | --- | --- |
+| `BenchmarkAndQuery` | `cpu/andquery.out` | `mem/andquery.out` | пересечение posting list-ов |
+| `BenchmarkOrQuery` | `cpu/orquery.out` | `mem/orquery.out` | объединение posting list-ов |
+| `BenchmarkNotQuery` | `cpu/notquery.out` | `mem/notquery.out` | отрицательный boolean-запрос |
+| `BenchmarkAdjQuery` | `cpu/adjquery.out` | `mem/adjquery.out` | позиционный оператор `ADJ` |
+| `BenchmarkNearQuery` | `cpu/nearquery.out` | `mem/nearquery.out` | позиционный оператор `NEAR/3` |
+| `BenchmarkBM25TopK` | `cpu/bm25topk.out` | `mem/bm25topk.out` | расчёт BM25 score и выбор top-K |
+| `BenchmarkWikiAndQuery` | `cpu/wikiandquery.out` | `mem/wikiandquery.out` | `AND`-запрос на Wikipedia corpus |
+| `BenchmarkWikiOrQuery` | `cpu/wikiorquery.out` | `mem/wikiorquery.out` | `OR`-запрос на Wikipedia corpus |
+| `BenchmarkWikiNearQuery` | `cpu/wikinearquery.out` | `mem/wikinearquery.out` | `NEAR/3`-запрос на Wikipedia corpus |
+| `BenchmarkWikiPhraseQuery` | `cpu/wikiphrasequery.out` | `mem/wikiphrasequery.out` | phrase-запрос на Wikipedia corpus |
+| `BenchmarkWikiComplexQuery` | `cpu/wikicomplexquery.out` | `mem/wikicomplexquery.out` | сложный комбинированный запрос |
+| `BenchmarkWikiBM25TopK` | `cpu/wikibm25topk.out` | `mem/wikibm25topk.out` | BM25 top-K на Wikipedia corpus |
+| `BenchmarkWikiTFIDFTopK` | `cpu/wikitfidftopk.out` | `mem/wikitfidftopk.out` | TF-IDF top-K на Wikipedia corpus |
+| `BenchmarkWikiMmapLookup` | `cpu/wikimmaplookup.out` | `mem/wikimmaplookup.out` | чтение posting list-а через mmap backend |
+| `BenchmarkWikiMemoryVsMmapAnd` | `cpu/wikimemoryvsmmapand.out` | `mem/wikimemoryvsmmapand.out` | сравнение memory и mmap backend для `AND`-запроса |
 
-На тематических запросах в top-результатах появляются ожидаемые статьи: `A Vindication of the Rights of Woman`, `Ada Lovelace`, `Dava Sobel`, `Egalitarianism`, `Dianic Wicca`.
+Для каждого `.out`-профиля дополнительно сохранялась текстовая сводка `pprof -top` в файл с суффиксом `_top.txt`.
 
-![Ranking latency](../../graphs/hw5/ranking_latency.png)
+### CPU profiles
 
-## Память и аллокации
+CPU-профили показывают, в каких функциях тратится основное процессорное время. В рамках поискового движка это позволяет проанализировать стоимость декодирования posting list-ов, пересечения и объединения списков документов, обработки позиционных операторов, heap merge и расчёта ranking score.
 
-Для query benchmark сохраняются `alloc_bytes_per_query` и `allocs_per_query`. По графику видно, что позиционные операции и сложные запросы создают больше временных структур, потому что им нужно декодировать positions и проверять расстояния между позициями.
+#### CPU profile: `BenchmarkWikiAndQuery`
 
-![Allocs by operator](../../graphs/hw5/allocs_by_operator.png)
+_Профиль пересечения posting list-ов на Wikipedia corpus._
 
-## Профилирование
+![CPU profile: BenchmarkWikiAndQuery](../../graphs/hw5/profiles/cpu_wikiandquery.png)
 
-CPU и memory profile я снимаю на базовом `50000`-срезе: для frame graph этого достаточно, а Web UI через `pprof` открывается заметно быстрее, чем на полном sharded-прогоне.
+#### CPU profile: `BenchmarkWikiOrQuery`
 
-Скрипты:
+_Профиль объединения posting list-ов для `OR`-запроса._
 
-```bash
-../scripts/hw5_profile_cpu.sh
-../scripts/hw5_profile_mem.sh
-```
+![CPU profile: BenchmarkWikiOrQuery](../../graphs/hw5/profiles/cpu_wikiorquery.png)
 
-Они сохраняют:
+#### CPU profile: `BenchmarkWikiNearQuery`
 
-```text
-reports/hw5/profiles/cpu_and.out
-reports/hw5/profiles/cpu_or.out
-reports/hw5/profiles/cpu_near.out
-reports/hw5/profiles/cpu_bm25.out
-reports/hw5/profiles/mem_query.out
-```
+_Профиль позиционного поиска `NEAR/3`, где дополнительно проверяются позиции термов._
 
-Открывать их удобнее сразу в Web UI:
+![CPU profile: BenchmarkWikiNearQuery](../../graphs/hw5/profiles/cpu_wikinearquery.png)
 
-```bash
-go tool pprof -http=:8080 reports/hw5/profiles/cpu_and.out
-```
+#### CPU profile: `BenchmarkWikiBM25TopK`
 
-Дальше уже из браузера можно снять нужные скриншоты flame graph / graph view и вставить их в отчёт.
+_Профиль ранжирования документов с использованием BM25._
 
-Ожидаемые bottleneck-и:
+![CPU profile: BenchmarkWikiBM25TopK](../../graphs/hw5/profiles/cpu_wikibm25topk.png)
 
-- tokenizer и построение map-ов на этапе build;
-- PForDelta encode/decode;
-- декодирование positions;
-- проверка positions для `ADJ` и `NEAR`;
-- BM25 scoring;
-- heap merge для `OR`.
+### Memory profiles
+
+Memory-профили показывают heap-аллокации во время выполнения benchmark-а. Они позволяют понять, какие части query execution создают больше временных объектов и дают наибольшее allocation pressure.
+
+#### Memory profile: `BenchmarkWikiAndQuery`
+
+_Аллокации при пересечении posting list-ов._
+
+![Memory profile: BenchmarkWikiAndQuery](../../graphs/hw5/profiles/mem_wikiandquery.png)
+
+#### Memory profile: `BenchmarkWikiOrQuery`
+
+_Аллокации при объединении результатов для `OR`-запроса._
+
+![Memory profile: BenchmarkWikiOrQuery](../../graphs/hw5/profiles/mem_wikiorquery.png)
+
+#### Memory profile: `BenchmarkWikiNearQuery`
+
+_Аллокации при позиционном поиске `NEAR/3`._
+
+![Memory profile: BenchmarkWikiNearQuery](../../graphs/hw5/profiles/mem_wikinearquery.png)
+
+#### Memory profile: `BenchmarkWikiBM25TopK`
+
+_Аллокации при ранжировании BM25 top-K._
+
+![Memory profile: BenchmarkWikiBM25TopK](../../graphs/hw5/profiles/mem_wikibm25topk.png)
+
+Профилирование показывает две разные стороны производительности. CPU-профили помогают найти функции, где тратится основное процессорное время: декодирование posting list-ов, работа с positions, пересечение списков, heap merge и расчёт score. Memory-профили показывают allocation pressure, то есть какие части query execution создают больше временных объектов в heap.
+
+Важно, что memory profile в `pprof` показывает heap-аллокации, а не полный memory footprint процесса. Поэтому эти профили используются для анализа временных аллокаций при выполнении запросов. Для сравнения общего потребления памяти между memory index и mmap segment нужен отдельный замер RSS/heap после загрузки backend-а.
 
 ## Где была сложность
 
@@ -318,51 +387,9 @@ go tool pprof -http=:8080 reports/hw5/profiles/cpu_and.out
 
 Еще одна проблема была в benchmark-наборе. Если брать самые частотные слова Wikipedia, запросы становятся слишком шумными. Поэтому query suite теперь фильтрует стоп-слова и выбирает более нормальные термы средней частоты.
 
-## Валидация корректности
-
-Покрыто тестами:
-
-- tokenizer;
-- delta encode/decode;
-- bitpack encode/decode;
-- PForDelta encode/decode;
-- index builder;
-- `AND`;
-- `OR`;
-- `NOT`;
-- `ADJ`;
-- `NEAR/k`;
-- TF-IDF;
-- BM25;
-- segment write/read;
-- mmap lookup;
-- query parser.
-
-Проверка:
-
-```bash
-go test ./...
-```
-
-Большие wiki benchmark-и не запускаются в обычном `go test`, потому что требуют локальный `wiki_sample.jsonl`.
-
 ## Что еще можно улучшить
 
 - добавить нормальный stop-word/stemming analyzer;
 - кешировать декодированные posting list-ы для mmap backend;
-- хранить skip offsets прямо внутрь compressed stream;
-- ограничить число worker-ов для parallel search по shard-ам, чтобы на очень большом числе segment-ов не создавать лишние goroutine;
-- добавить snippets;
-- отдельно сравнить холодный mmap и теплый mmap;
-- разобраться с 4 расхождениями `NEAR/3` на `DOCS=25000`;
-- добавить regression-test, который сравнивает memory и mmap для proximity-запросов на большом корпусе.
-
-## Выводы
-
-Получился рабочий позиционный inverted index: он строит координатные posting list-ы, поддерживает boolean и proximity-запросы, сохраняет индекс на диск, открывает его через mmap и сжимает postings.
-
-На базовом segment-е `50000` документов сжатие уменьшило raw postings на `43.07%`: postings сжались с `867.25 MB` до `445.20 MB`, а весь segment с учетом dictionary, skips, doc norms и titles занимает `562.78 MB` на диске. Самые быстрые запросы — одиночный term и topK. Позиционные запросы дороже, потому что после пересечения документов нужно проверять positions.
-
-В single-segment sanity-check на `DOCS=10000` memory и mmap совпали для `100/100` запросов. На `DOCS=25000` совпало `96/100`; оставшиеся расхождения локализованы в `NEAR/3`, поэтому это главный следующий пункт для доработки. Для больших размеров используется sharded benchmark: `1`, `9` и `17` segment-ов. На полном Wikipedia-срезе `835456` документов средняя latency по `500` запросам получилась `43.67 ms`.
-
-Synthetic я оставляю только для smoke-проверок. Основной корпус для отчета — Wikipedia `6.1 GB` и тематические запросы про женщин, права, образование, феминизм и науку.
+- добавить замеры memory footprint: RSS/heap после загрузки memory index и после открытия mmap segment
+- разобраться с расхождениями NEAR/3 на DOCS=25000
