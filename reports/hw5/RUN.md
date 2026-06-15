@@ -114,6 +114,7 @@ go run ./cmd/searchdemo --mode search --index ./data/wiki_50k.seg --query '"mari
 Если нужен интерактивный режим, можно открыть REPL так:
 
 ```bash
+make run-cli
 go run ./cmd/searchdemo --mode repl --index ./data/wiki_50k.seg
 ```
 

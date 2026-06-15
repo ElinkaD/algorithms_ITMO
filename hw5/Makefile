@@ -113,7 +113,7 @@ bench-ranking-wiki:
 	go run ./cmd/searchdemo --mode bench-ranking-wiki --input $(WIKI) --limit $(DOCS) --index $(INDEX) --topK $(TOPK) --iterations $(ITERATIONS)
 
 run-cli:
-	go run ./cmd/searchdemo --mode repl --index ./data/index.seg
+	go run ./cmd/searchdemo --mode repl --index $(INDEX)
 
 graphs:
 	cd .. && $(PYTHON) scripts/visualize_hw5_benchmarks.py

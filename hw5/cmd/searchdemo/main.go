@@ -24,7 +24,7 @@ import (
 func main() {
 	mode := flag.String("mode", "demo", "demo|build|search|repl|bench-smoke|build-wiki|build-wiki-shards|wiki-stats|wiki-scale-stats|wiki-report-scale-stats|prepare-wiki-queries|bench-query-wiki|bench-query-wiki-shards|compression-stats-wiki|compression-stats-synthetic|bench-ranking-wiki|bench-build-wiki|bench-wiki|profile-workload")
 	docs := flag.Int("docs", 5000, "number of synthetic documents")
-	indexPath := flag.String("index", "./data/index.seg", "segment path")
+	indexPath := flag.String("index", "./data/wiki_50k.seg", "segment path")
 	halfIndexPath := flag.String("half-index", "./data/wiki_shards/prefix-417728", "half-dataset shard directory")
 	input := flag.String("input", "./data/wiki_sample.jsonl", "wiki JSONL input")
 	limit := flag.Int("limit", 5000, "wiki limit")
