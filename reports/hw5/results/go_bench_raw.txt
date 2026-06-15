@@ -1,0 +1,32 @@
+goos: darwin
+goarch: amd64
+pkg: hw5
+cpu: Intel(R) Core(TM) i5-8279U CPU @ 2.40GHz
+BenchmarkBuildIndex_1k-8       	       7	 155458180 ns/op	48991781 B/op	  603164 allocs/op
+BenchmarkBuildIndex_5k-8       	       2	 797402053 ns/op	226871316 B/op	 2761116 allocs/op
+BenchmarkBuildIndex_10k-8      	       1	2054451581 ns/op	444252256 B/op	 5370148 allocs/op
+BenchmarkAndQuery-8            	     595	   1971966 ns/op	 1608208 B/op	    9862 allocs/op
+BenchmarkOrQuery-8             	     363	   4027353 ns/op	 1815864 B/op	   24789 allocs/op
+BenchmarkNotQuery-8            	    8764	    128606 ns/op	   17560 B/op	      21 allocs/op
+BenchmarkAdjQuery-8            	    1171	    922650 ns/op	  286168 B/op	    1861 allocs/op
+BenchmarkNearQuery-8           	     595	   2166618 ns/op	 1255616 B/op	    7765 allocs/op
+BenchmarkBM25TopK-8            	     253	   4623131 ns/op	    9608 B/op	     163 allocs/op
+BenchmarkCompressionEncode-8   	    1251	    937424 ns/op	  107000 B/op	     403 allocs/op
+BenchmarkCompressionDecode-8   	    5240	    231001 ns/op	  186976 B/op	     170 allocs/op
+BenchmarkMmapTermLookup-8      	     328	   3872698 ns/op	 1205761 B/op	   25988 allocs/op
+PASS
+ok  	hw5	43.645s
+?   	hw5/cmd/searchdemo	[no test files]
+PASS
+ok  	hw5/internal/analyzer	0.490s
+?   	hw5/internal/benchdata	[no test files]
+PASS
+ok  	hw5/internal/codec	0.483s
+PASS
+ok  	hw5/internal/index	0.481s
+PASS
+ok  	hw5/internal/query	0.489s
+PASS
+ok  	hw5/internal/scoring	0.489s
+PASS
+ok  	hw5/internal/storage	0.491s
